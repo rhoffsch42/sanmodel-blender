@@ -4,7 +4,8 @@
     # [x] vertices
     # [x] normals
     # [ ] tangents
-    # [ ] uv
+    # [x] uv
+    #       todo: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything 
     # [ ] uv2
     # [ ] uv3
     # [x] colors
@@ -16,7 +17,7 @@
     # export:
     # [x] name
     # [x] vertices
-    # [ ] normals
+    # [x] normals
     # [ ] tangents
     # [ ] uv
     # [ ] uv2
@@ -126,13 +127,14 @@ from bpy.props import (StringProperty,
                        PointerProperty,
                        )
 
+smd = None
 SAN_ENDIAN = "<"
 SAN_VERTICES = 0
 SAN_NORMALS = 1
 SAN_TANGENTS = 2
 SAN_UV = 3
-SAN_UV1 = 4
-SAN_UV2 = 5
+SAN_UV2 = 4
+SAN_UV3 = 5
 SAN_COLORS = 6
 SAN_TRIANGLES = 7
 SAN_BONEWEIGHTS = 8
@@ -145,6 +147,26 @@ def reinterpret_float_to_int(float_value):
     return struct.unpack(SAN_ENDIAN+"i", struct.pack(SAN_ENDIAN+"f", float_value))[0]
 
 class SanImportSettings(PropertyGroup):
+    # internal properties
+    path : StringProperty(
+        name="sanmodel path",
+        description="the path of the sanmodel",
+        default = "..."
+        )
+    name : StringProperty(name="name", default = "...")
+    vertices : StringProperty(name="vertices", default = "0")
+    normals : StringProperty(name="normals", default = "0")
+    tangents : StringProperty(name="tangents", default = "0")
+    uv : StringProperty(name="uv", default = "0")
+    uv1 : StringProperty(name="uv1", default = "0")
+    uv2 : StringProperty(name="uv2", default = "0")
+    colors : StringProperty(name="colors", default = "0")
+    triangles : StringProperty(name="triangles", default = "0")
+    #todo?:bindposes
+    #todo?:boneweights       
+    valid_file : BoolProperty(name="validation check", default = False)
+    
+    # user settings
     invert_yz_axis : BoolProperty(
         name="Invert Y and Z axis",
         description="Invert y and z coordinates of vertices",
@@ -159,6 +181,11 @@ class SanImportSettings(PropertyGroup):
         name="Use Alpha channel (transparency)",
         description="Enable or disable the use of Alpha channel of vertex colors for triangles shading",
         default = True
+        )
+    shading_nodes : BoolProperty(
+        name="Generate shading nodes",
+        description="Generate shading nodes depending on previous settings (vertex_color, uv)",
+        default = False
         )
     # my_int : IntProperty(
     #     name = "Triangles drawn",
@@ -177,13 +204,18 @@ class sanmodel_data():
         settings = context.scene.san_settings
 
         # read name
-        self.name, self.content = self.content.split(b'\0', 1)
+        try:
+            self.name, self.content = self.content.split(b'\0', 1)
+        except ValueError:
+            print("Error with the specified file, invalid data")
+            return False
         self.name = self.name.decode()
         content_len = len(self.content)
         bsize = 4 # size for each value in bytes
         print("model name: %s\ncontent len: %d bytes, %d values" % (self.name, content_len, content_len/bsize))
         if (content_len % bsize) > 0:
-            assert "File corrupted. Data length not a multiple of %d" % bsize # filelen - name_len - 1
+            print("Error with the specified file, invalid data: should be only 4 bytes number after the null terminated name")
+            return False
 
         print("---------------- File content (without the name) -----------------")
         print(self.content)
@@ -196,7 +228,7 @@ class sanmodel_data():
         seg_vars = [3, 3, 4, 2, 2, 2, 4, 1, 1, 16] # cf file structure
         for vars in seg_vars:
             if not len(self.content):
-                print(f"missing data to read, meaning the file is invalid")
+                print("Error with the specified file, invalid data: missing data")
                 return False
             segment_len = reinterpret_float_to_int(self.content[0]) * vars
             print(f"segment_len : {segment_len}")
@@ -212,7 +244,8 @@ class sanmodel_data():
                 self.segments.append([])
         print("data left: ", self.content)
         if len(self.content):
-            assert "Slicing left some data, this shouldn't be the case."
+            print("Error with the specified file, invalid data: slicing left some data, this shouldn't be the case.")
+            return False
         
         #reinterpret triangles and boneWeights data as int
         for i in range(7, 9):
@@ -250,7 +283,8 @@ class sanmodel_data():
         vert2 = (start + drawn) * 3
         tri1 = start
         tri2 = (start + drawn)
-        mesh.from_pydata(self.segments[SAN_VERTICES][vert1:vert2],[],self.segments[SAN_TRIANGLES][tri1:tri2])
+        # mesh.from_pydata(self.segments[SAN_VERTICES][vert1:vert2],[],self.segments[SAN_TRIANGLES][tri1:tri2])
+        mesh.from_pydata(self.segments[SAN_VERTICES],[],self.segments[SAN_TRIANGLES])
         
         mesh.update(calc_edges=False)
         # create new obj with the mesh
@@ -261,7 +295,7 @@ class sanmodel_data():
         obj.select_set(True)
         return obj
 
-
+# https://b3d.interplanety.org/en/learning-loops/
 class MESH_OT_sanmodel_import(Operator):
     """import a sanmodel file"""
     bl_idname = "mesh.sanmodel_import"
@@ -284,7 +318,48 @@ class MESH_OT_sanmodel_import(Operator):
     @staticmethod
     def apply_tangents(obj, tangents):
         pass
+        # obj.data.use_auto_smooth = True # or it will not work
+        # for i, n in enumerate(normals):
+        #     normals[i] = Vector((1,1,1)).normalized()[:]
+        #     print(f"{n} -> {normals[i]}")
+        # obj.data.normals_split_custom_set_from_vertices(tangents)
+        # obj.data.calc_normals_split()
     
+    #https://b3d.interplanety.org/en/working-with-uv-maps-through-the-blender-api/
+    @staticmethod
+    def create_uv_layer(obj, uv_name, uv):
+        #cube example : 6 quadfaces -> 12 triangles -> 36 vertices -> 36 uv
+        obj.data.uv_layers.new(name=uv_name)
+        i = 0
+        for poly in obj.data.polygons:
+            for idx in poly.vertices:
+                # print(f"applying uv #{idx}")
+                # obj.data.uv_layers.active.data[i].uv = uv[idx]
+                obj.data.uv_layers[uv_name].data[i].uv = uv[idx]
+                i += 1
+        # print(f"uv applied: {i}")
+
+    @staticmethod
+    def apply_uv(context, obj, uv):
+        if not len(uv):
+            return
+        settings = context.scene.san_settings
+        MESH_OT_sanmodel_import.create_uv_layer(obj, obj.name+"UVMap", uv)
+    
+    @staticmethod
+    def apply_uv2(context, obj, uv):
+        if not len(uv):
+            return
+        settings = context.scene.san_settings
+        MESH_OT_sanmodel_import.create_uv_layer(obj, obj.name+"UV2Map", uv)
+    
+    @staticmethod
+    def apply_uv3(context, obj, uv):
+        if not len(uv):
+            return
+        settings = context.scene.san_settings
+        MESH_OT_sanmodel_import.create_uv_layer(obj, obj.name+"UV3Map", uv)
+
     @staticmethod
     def apply_colors(context, obj, colors):
         settings = context.scene.san_settings
@@ -336,25 +411,17 @@ class MESH_OT_sanmodel_import(Operator):
 
     def execute(self, context):
         settings = context.scene.san_settings
-        smd = sanmodel_data()
-
-        if self.path == "":
-            self.report(
-                {'ERROR'},
-                f"Error with the specified file")
-            print(f"'{self.path}' not found")
+        global smd
+        if not smd:
+            print("Error: No data available to create the object")
             return {'CANCELLED'}
-
-        print(f"opening '{self.path}' ...")
-        with open(self.path, 'rb') as fs:#todo:check for error
-            smd.content = (fs.read())
-        
-        if not smd.process_data(context):
-            return {'CANCELLED'}
-        for i in range(12, 13):
+        for i in range(1, 2):
             obj = smd.create_obj(context, 0, i)
             self.apply_normals(obj, smd.segments[SAN_NORMALS])
-            self.apply_tangents(obj, smd.segments[SAN_TANGENTS])
+            # self.apply_tangents(obj, smd.segments[SAN_TANGENTS])
+            self.apply_uv(context, obj, smd.segments[SAN_UV])
+            self.apply_uv2(context, obj, smd.segments[SAN_UV2])
+            self.apply_uv3(context, obj, smd.segments[SAN_UV3])
             if settings.use_vertex_colors:
                 self.apply_colors(context, obj, smd.segments[SAN_COLORS])
             obj.location[0] += i*5
@@ -430,8 +497,28 @@ class MESH_OT_sanmodel_export(Operator):
             # print(normals[idx*4:idx*4+4])
         return normals
     @staticmethod
-    def extract_tangents(mesh):
-        return []
+    def extract_tangents(mesh, amount):
+        # within a face with multiple triangles, if a shared vertex has different tangents in the loops, the last one will override others
+        tangents = np.empty(amount*3, dtype=SAN_ENDIAN+"f")
+        for loop in mesh.loops:
+            idx = loop.vertex_index
+            tangents[idx*3:idx*3+3] = loop.tangent[:]
+            # print(f"extracting tangent #{idx}")
+            # print(tangents[idx*4:idx*4+4])
+        return tangents
+        #https://blender.stackexchange.com/questions/26116/script-access-to-tangent-and-bitangent-per-face-how
+        me = bpy.context.active_object.data
+        # tangents have to be pre-calculated
+        # this will also calculate loop normal
+        me.calc_tangents()
+        # loop faces
+        for face in me.polygons:
+            # loop over face loop
+            for vert in [me.loops[i] for i in face.loop_indices]:
+                tangent = vert.tangent
+                normal = vert.normal
+                bitangent = vert.bitangent_sign * normal.cross(tangent)
+    
     @staticmethod
     def extract_uv1(mesh):
         return []
@@ -530,7 +617,7 @@ class MESH_OT_sanmodel_export(Operator):
         segments = [
             self.extract_vertices(bl_mesh),
             self.extract_normals(bl_mesh, len_vertices),
-            self.extract_tangents(bl_mesh),
+            self.extract_tangents(bl_mesh, len_vertices),
             self.extract_uv1(bl_mesh),
             self.extract_uv2(bl_mesh),
             self.extract_uv3(bl_mesh),
@@ -540,6 +627,7 @@ class MESH_OT_sanmodel_export(Operator):
             self.extract_bindposes(bl_mesh),
         ]
         # self.content = np.array(list(struct.iter_unpack(SANMODEL_ENDIAN+"f", self.content[0:content_len])), dtype=float).flatten()
+        seg_names = ["vertices", "normals", "tangents", "uv", "uv2", "uv3", "colors", "triangles", "boneWeeights", "bindposes"]
         for i, s in enumerate(segments):
             array_size = len(s)
             export_size = array_size // seg_vars[i]
@@ -549,7 +637,7 @@ class MESH_OT_sanmodel_export(Operator):
             barray = bytearray(s)#todo: force endian
             data[len(data):] = struct.pack(SAN_ENDIAN+"i", export_size) #bytearray([export_size])
             data[len(data):] = barray
-            print(f"segment #{i} : {array_size}")
+            print(f"segment {seg_names[i]} : {array_size}")
             print(barray)
         print("\nexport full data:")
         print(data)
@@ -599,17 +687,48 @@ class MESH_OT_sanmodel_export(Operator):
 
         return {'FINISHED'}
     
-class OT_TestOpenFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
-    bl_idname = "test.open_filebrowser"
+class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
+    bl_idname = "import.open_filebrowser"
     bl_label = "Open"
     
     def execute(self, context):
         """Do something with the selected file(s)."""
-        bpy.ops.mesh.sanmodel_import(path=self.filepath)
+        settings = context.scene.san_settings
+        settings.valid_file = False
+        global smd
+        smd = sanmodel_data()
+
+        if self.filepath == "":
+            print(f"'{settings.path}' not found")
+            self.report({'ERROR'}, f"Error with the specified file (see System Console for more detail)")
+            return {'CANCELLED'}
+
+        settings.path = self.filepath
+        print(f"opening '{settings.path}' ...")
+        with open(settings.path, 'rb') as fs:#todo:check for error
+            smd.content = (fs.read())
+        
+        settings.valid_file = smd.process_data(context)
+        if not settings.valid_file:
+            self.report({'ERROR'}, f"Error with the specified file (see System Console for more detail)")
+            return {'CANCELLED'}
+        
+        settings.name = smd.name
+        settings.vertices = str(len(smd.segments[SAN_VERTICES]))
+        settings.normals = str(len(smd.segments[SAN_NORMALS]))
+        settings.tangents = str(len(smd.segments[SAN_TANGENTS]))
+        settings.uv = str(len(smd.segments[SAN_UV]))
+        settings.uv1 = str(len(smd.segments[SAN_UV2]))
+        settings.uv2 = str(len(smd.segments[SAN_UV2]))
+        settings.colors = str(len(smd.segments[SAN_COLORS]))
+        settings.triangles = str(len(smd.segments[SAN_TRIANGLES]))
+        # settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
+        # settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
+        context.area.tag_redraw()
         return {'FINISHED'}
 
-class OT_TestExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
-    bl_idname = "test.export_filebrowser"
+class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
+    bl_idname = "export.open_filebrowser"
     bl_label = "Open"
 
     filename_ext = ".sanmodel"
@@ -644,31 +763,59 @@ class MESH_OT_debug_sanmodel(Operator):
 
 #https://blender.stackexchange.com/questions/57306/how-to-create-a-custom-ui/57332#57332
 #https://www.youtube.com/watch?v=opZy2OJp8co&list=PLa1F2ddGya_8acrgoQr1fTeIuQtkSd6BW
-class VIEW_3D_PT_sanmodel_import_panel(Panel):
-    bl_label = "Import"
-    bl_idname = "SANMODEL_PANEL_PT_sanmodel_import_panel"
+class sanmodel_import_panel:
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'sanmodel'
-    
+class VIEW_3D_PT_sanmodel_import_panel(sanmodel_import_panel, Panel):
+    bl_label = "Import"
+    bl_idname = "SANMODEL_PANEL_PT_sanmodel_import_panel"
+
     def draw(self, context):
         settings = context.scene.san_settings
-        
-        # only? way to access the custom properties fields/details
-        # first property index is 2
-        rna_invert_yz = settings.bl_rna.properties[2]
-        rna_use_vertex_color = settings.bl_rna.properties[3]
-        rna_use_alpha = settings.bl_rna.properties[4]
-        self.layout.prop(settings, rna_invert_yz.identifier, text=rna_invert_yz.name)
-        self.layout.prop(settings, rna_use_vertex_color.identifier, text=rna_use_vertex_color.name)
-        if settings.use_vertex_colors:
-            self.layout.prop(settings, rna_use_alpha.identifier, text=rna_use_alpha.name)
+        layout = self.layout
+        rna_path = settings.bl_rna.properties["path"]
+        rna_invert_yz = settings.bl_rna.properties["invert_yz_axis"]
+        rna_use_vertex_color = settings.bl_rna.properties["use_vertex_colors"]
+        rna_use_alpha = settings.bl_rna.properties["use_alpha"]
+        rna_shading_nodes = settings.bl_rna.properties["shading_nodes"]
 
-        col = self.layout.column(align=True)
-        props = col.operator("test.open_filebrowser",
-            text="import",
+        # inport button
+        box = layout.box()
+        props = box.operator("import.open_filebrowser",
+            text=settings.path,
             icon="IMPORT")
-        props = self.layout.operator("test.debug_sanmodel",
+
+        # details
+        if settings.valid_file and smd:
+            details = box.column(align=True)
+            details.label(text="name: " + settings.name)
+            details.label(text="vertices: " + settings.vertices)
+            details.label(text="normals: " + settings.normals)
+            details.label(text="tangents: " + settings.tangents)
+            details.label(text="uv: " + settings.uv)
+            details.label(text="uv1: " + settings.uv1)
+            details.label(text="uv2: " + settings.uv2)
+            details.label(text="colors: " + settings.colors)
+            details.label(text="triangles: " + settings.triangles)
+            # details.label(text="boneweights: " + settings.boneweights)
+            # details.label(text="bindposes: " + settings.bindposes)
+
+            # settings
+            #layout.prop(settings, rna_path.identifier, text=rna_path.name)
+            layout.prop(settings, rna_invert_yz.identifier, text=rna_invert_yz.name)
+            layout.prop(settings, rna_use_vertex_color.identifier, text=rna_use_vertex_color.name)
+            if settings.use_vertex_colors:
+                layout.prop(settings, rna_use_alpha.identifier, text=rna_use_alpha.name)
+            layout.prop(settings, rna_shading_nodes.identifier, text=rna_shading_nodes.name)
+            
+            # create model
+            props = layout.operator("mesh.sanmodel_import",
+                text="Create new object",
+                icon="MESH_CUBE")
+            # bpy.ops.mesh.sanmodel_import(path=self.filepath)
+
+        props = layout.operator("test.debug_sanmodel",
             text = "selected objects debug",
             icon = "INFO")
 class VIEW_3D_PT_sanmodel_export_panel(Panel):
@@ -682,7 +829,7 @@ class VIEW_3D_PT_sanmodel_export_panel(Panel):
         settings = context.scene.san_settings
 
         col = self.layout.column(align=True)
-        props = col.operator("test.export_filebrowser",
+        props = col.operator("export.open_filebrowser",
             text="export",
             icon="EXPORT")
         props = self.layout.operator("test.debug_sanmodel",
@@ -724,7 +871,7 @@ def import_menu_draw(self, context):
             text="Sanctuary model (.sanmodel)",
             icon="EVENT_S")
 def export_menu_draw(self, context):
-    self.layout.operator("test.export_filebrowser",
+    self.layout.operator("export.export_filebrowser",
             text="Sanctuary model (.sanmodel)",
             icon="EVENT_S")
 
@@ -732,8 +879,8 @@ blender_classes = [
     SanImportSettings,
     MESH_OT_sanmodel_import,
     MESH_OT_sanmodel_export,
-    OT_TestOpenFilebrowser,
-    OT_TestExportFilebrowser,
+    OT_ImportFilebrowser,
+    OT_ExportFilebrowser,
     VIEW_3D_PT_sanmodel_import_panel,
     VIEW_3D_PT_sanmodel_export_panel,
     OBJECT_OT_object_to_mesh,
