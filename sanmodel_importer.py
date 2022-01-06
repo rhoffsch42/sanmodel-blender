@@ -2,7 +2,8 @@
     # IMPORT:
     # [✅] name
     # [✅] vertices
-    # [✅] normals
+    # [❌] normals
+    #        ❌ when swapping YZ: face normals are fucked up
     # [❌] tangents
     # [✅] uv0
     #       todo: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
@@ -19,7 +20,8 @@
     # [✅] name
     #       set a custom name with a field in the UI?
     # [✅] vertices
-    # [✅] normals
+    # [❌] normals
+    #        ❌ when swapping YZ: chcek export is ok
     # [❌] tangents
     #       check if everything is alright when import part will be done
     # [✅] uv0
@@ -138,6 +140,11 @@ from bpy.props import (StringProperty,
                        PointerProperty,
                        )
 
+def vecUnityToBlender(vec):
+    return (vec[0], vec[2], -vec[1])
+def vecBlenderToUnity(vec):
+    return (vec[0], -vec[2], vec[1])
+
 smd = None
 SAN_ENDIAN = "<"
 SAN_VERTICES = 0
@@ -180,7 +187,7 @@ class SanImportSettings(PropertyGroup):
     # user settings
     swap_yz_axis : BoolProperty(
         name="Swap Y and Z axis",
-        description="Invert y and z coordinates of vertices",
+        description="Swap y and z coordinates of vertices",
         default = False
         )
     mirror_uv_vertically : BoolProperty(
@@ -211,7 +218,7 @@ class SanImportSettings(PropertyGroup):
     #     max = 100
     #     )
 
-class sanmodel_data():
+class SanmodelData():
     content: bytes
     name: StringIO
     segments: list
@@ -288,11 +295,9 @@ class sanmodel_data():
         mesh = bpy.data.meshes.new(self.name + "Mesh")
 
         #swap z and y axis to match unity
-        vertices = self.segments[SAN_VERTICES]
+        vertices = self.segments[SAN_VERTICES][:]
         if settings.swap_yz_axis:
-            vertices = [(v[0], v[2], v[1]) for v in vertices]
-            # for i, vertex in enumerate(self.segments[SAN_VERTICES]):
-                # vertices[i] = tuple([vertex[0], vertex[2], vertex[1]])
+            vertices = [vecUnityToBlender(v) for v in vertices]
 
         # inject data
         vert1 = start * 3
@@ -323,12 +328,15 @@ class MESH_OT_sanmodel_import(Operator):
         )
     
     @staticmethod
-    def apply_normals(obj, normals):
+    def apply_normals(obj, normals, swap_yz_axis):
         obj.data.use_auto_smooth = True # or it will not work
         # for i, n in enumerate(normals):
         #     normals[i] = Vector((1,1,1)).normalized()[:]
         #     print(f"{n} -> {normals[i]}")
-        obj.data.normals_split_custom_set_from_vertices(normals)
+        used = normals[:]
+        if swap_yz_axis:
+            used = [vecUnityToBlender(n) for n in normals]
+        obj.data.normals_split_custom_set_from_vertices(used)
         obj.data.calc_normals_split()
     
     @staticmethod
@@ -434,7 +442,7 @@ class MESH_OT_sanmodel_import(Operator):
             return {'CANCELLED'}
         for i in range(1, 2):
             obj = smd.create_obj(context, 0, i)
-            self.apply_normals(obj, smd.segments[SAN_NORMALS])
+            self.apply_normals(obj, smd.segments[SAN_NORMALS], settings.swap_yz_axis)
             # self.apply_tangents(obj, smd.segments[SAN_TANGENTS])
             self.apply_uv0(context, obj, smd.segments[SAN_UV0])
             self.apply_uv1(context, obj, smd.segments[SAN_UV1])
@@ -501,14 +509,17 @@ class MESH_OT_sanmodel_export(Operator):
 
     @staticmethod
     def extract_vertices(mesh):
-        return np.array([[v.co.x, v.co.y, v.co.z] for v in mesh.vertices], dtype=SAN_ENDIAN+"f").flatten()
+        return np.array([vecBlenderToUnity(v.co) for v in mesh.vertices], dtype=SAN_ENDIAN+"f").flatten()
     @staticmethod
-    def extract_normals(mesh, amount):
+    def extract_normals(mesh, amount, swap_yz_axis):
         # within a face with multiple triangles, if a shared vertex has different normals in the loops, the last one will override others
         normals = np.empty(amount*3, dtype=SAN_ENDIAN+"f")
         for loop in mesh.loops:
             idx = loop.vertex_index
-            normals[idx*3:idx*3+3] = loop.normal[:]
+            if swap_yz_axis:
+                normals[idx*3:idx*3+3] = vecBlenderToUnity(loop.normal)
+            else:
+                normals[idx*3:idx*3+3] = loop.normal[:]
             # print(f"extracting normal #{idx}")
             # print(normals[idx*4:idx*4+4])
         return normals
@@ -518,7 +529,7 @@ class MESH_OT_sanmodel_export(Operator):
         tangents = np.empty(amount*3, dtype=SAN_ENDIAN+"f")
         for loop in mesh.loops:
             idx = loop.vertex_index
-            tangents[idx*3:idx*3+3] = loop.tangent[:]
+            tangents[idx*3:idx*3+3] = loop.tangent[:] # swap_yz_axis ?
             # print(f"extracting tangent #{idx}")
             # print(tangents[idx*4:idx*4+4])
         return tangents
@@ -627,7 +638,7 @@ class MESH_OT_sanmodel_export(Operator):
         len_vertices = len(bl_mesh.vertices)
         segments = [
             self.extract_vertices(bl_mesh),
-            self.extract_normals(bl_mesh, len_vertices),
+            self.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
             self.extract_tangents(bl_mesh, len_vertices),
             self.extract_uv(context.selected_objects[0], len_vertices, "UV0Map", settings.mirror_uv_vertically),
             self.extract_uv(context.selected_objects[0], len_vertices, "UV1Map", settings.mirror_uv_vertically),
@@ -707,7 +718,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings = context.scene.san_settings
         settings.valid_file = False
         global smd
-        smd = sanmodel_data()
+        smd = SanmodelData()
 
         if self.filepath == "":
             print(f"'{settings.path}' not found")
