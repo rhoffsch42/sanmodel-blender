@@ -38,11 +38,13 @@
     # [❌] boneWeights
     # [❌] bindposes
     #
+    # [❌] Quads to triangles: UV are fucked up, check colors too
+    #
     # Blender <-> sanmodel(Unity) coordinates system with test_model sanmodel/fbx
-    # [❔] Colors of the TestQube are still wrong? color of each vertex is OK, the faces triangles are different from the screen
+    # [❔] Colors of the TestQube are still wrong? color of each vertex is OK, the faces triangles are different from the screenshot
     #         checked the indices manually, everything seams OK. 
     # [❌] export a fbx based model, reimport the new sanmodel (fbx -> blender -> sanmodel -> blender) (rotations are not ok with the fbx importer, not our business)
-    #          the triangled mesh is ok, UV are fucked up
+    #          the triangled mesh is ok, UV are fucked up becquse of quad faces not handled
     # [✅] export a sanmodel based model, reimport the new sanmodel (sanmodel -> blender -> sanmodel -> blender)
     #
 
@@ -715,7 +717,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings.tangents = str(len(smd.segments[SAN_TANGENTS]))
         settings.uv = str(len(smd.segments[SAN_UV0]))
         settings.uv1 = str(len(smd.segments[SAN_UV1]))
-        settings.uv2 = str(len(smd.segments[SAN_UV1]))
+        settings.uv2 = str(len(smd.segments[SAN_UV2]))
         settings.colors = str(len(smd.segments[SAN_COLORS]))
         settings.indices = str(len(smd.segments[SAN_INDICES]))
         # settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
