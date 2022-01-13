@@ -3,7 +3,8 @@
     # [✅] name
     # [✅] vertices
     # [✅] normals
-    # [❌] tangents: what is the 4th value? check with unity
+    # [✅] tangents: actually ignored, they are computed from the normals and uv0, it seams they can't be mannualy set
+    #       4th value is the bitangent_sign: #https://answers.unity.com/questions/7789/calculating-tangents-vector4.html
     # [✅] uv0
     #       todo: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
     # [✅] uv1
@@ -20,8 +21,7 @@
     #       set a custom name with a field in the UI?
     # [✅] vertices
     # [✅] normals
-    # [❌] tangents
-    #       check if everything is alright when import part will be done
+    # [✅] tangents: swapping YZ axis or mirroring UV can invert bitangent_sign, this should be handled. cf MESH_OT_sanmodel_export.extract_tangents()
     # [✅] uv0: export the uv_layer named "UV0Map"
     # [✅] uv1: export the uv_layer named "UV1Map"
     # [✅] uv2: export the uv_layer named "UV2Map"
@@ -165,6 +165,9 @@ SAN_COLORS = 6
 SAN_INDICES = 7
 SAN_BONEWEIGHTS = 8
 SAN_BINDPOSES = 9
+UV0_NAME = "UV0Map"
+UV1_NAME = "UV1Map"
+UV2_NAME = "UV2Map"
 
 # int.from_bytes(b'\x00\x00\x00\xff', byteorder='big') # 255
 # int.from_bytes(b'\x00\x00\x00\xff', byteorder='little') # 4278190080
@@ -232,8 +235,6 @@ class SanmodelData():
     segments: list
     
     def process_data(self, context):
-        settings = context.scene.san_settings
-
         # read name
         try:
             self.name, self.content = self.content.split(b'\0', 1)
@@ -310,11 +311,11 @@ class SanmodelData():
             vertices = [vecSanmodelToBlender(v) for v in vertices]
             indices = [vecSanmodelToBlender(i) for i in indices]
 
-        # inject data
-        vert1 = start * 3
-        vert2 = (start + drawn) * 3
-        tri1 = start
-        tri2 = (start + drawn)
+        # custom indices
+        # vert1 = start * 3
+        # vert2 = (start + drawn) * 3
+        # tri1 = start
+        # tri2 = (start + drawn)
         # mesh.from_pydata(vertices[vert1:vert2],[],self.segments[SAN_INDICES][tri1:tri2])
         mesh.from_pydata(vertices,[],indices)
         
@@ -349,20 +350,14 @@ class MESH_OT_sanmodel_import(Operator):
             used = [vecSanmodelToBlender(n) for n in normals]
         obj.data.normals_split_custom_set_from_vertices(used)
         obj.data.calc_normals_split()
-    
     @staticmethod
-    def apply_tangents(obj, tangents):
-        pass
-        # obj.data.use_auto_smooth = True # or it will not work
-        # for i, n in enumerate(normals):
-        #     normals[i] = Vector((1,1,1)).normalized()[:]
-        #     print(f"{n} -> {normals[i]}")
-        # obj.data.normals_split_custom_set_from_vertices(tangents)
-        # obj.data.calc_normals_split()
-    
-    #https://b3d.interplanety.org/en/working-with-uv-maps-through-the-blender-api/
+    def apply_tangents(obj, tangents, uvname):#requires uv0
+        obj.data.calc_tangents(uvmap=uvname)
+        # they are computed from the normals and uv map, then stored in the loops
+        # can't manually set tangents? maybe to avoid having an invalid tengant space
     @staticmethod
     def create_uv_layer(obj, uv_name, uv):
+        #https://b3d.interplanety.org/en/working-with-uv-maps-through-the-blender-api/
         #cube example : 6 quadfaces -> 12 triangles -> 36 vertices -> 36 uv
         obj.data.uv_layers.new(name=uv_name)
         i = 0
@@ -373,7 +368,6 @@ class MESH_OT_sanmodel_import(Operator):
                 obj.data.uv_layers[uv_name].data[i].uv = uv[idx]
                 i += 1
         # print(f"uv applied: {i}")
-
     @staticmethod
     def apply_uv0(context, obj, uv):
         if not len(uv):
@@ -382,11 +376,10 @@ class MESH_OT_sanmodel_import(Operator):
         used = uv
         if settings.mirror_uv_vertically:
             used = [(e[0], 1-e[1]) for e in uv]
-        MESH_OT_sanmodel_import.create_uv_layer(obj, "UV0Map", used)
+        MESH_OT_sanmodel_import.create_uv_layer(obj, UV0_NAME, used)
 
         if settings.shading_nodes:#cf shader-nodes-2.png
             pass
-    
     @staticmethod
     def apply_uv1(context, obj, uv):
         if not len(uv):
@@ -395,8 +388,7 @@ class MESH_OT_sanmodel_import(Operator):
         used = uv
         if settings.mirror_uv_vertically:
             used = [(e[0], 1-e[1]) for e in uv]
-        MESH_OT_sanmodel_import.create_uv_layer(obj, "UV1Map", used)
-    
+        MESH_OT_sanmodel_import.create_uv_layer(obj, UV1_NAME, used)
     @staticmethod
     def apply_uv2(context, obj, uv):
         if not len(uv):
@@ -405,8 +397,7 @@ class MESH_OT_sanmodel_import(Operator):
         used = uv
         if settings.mirror_uv_vertically:
             used = [(e[0], 1-e[1]) for e in uv]
-        MESH_OT_sanmodel_import.create_uv_layer(obj, "UV2Map", used)
-
+        MESH_OT_sanmodel_import.create_uv_layer(obj, UV2_NAME, used)
     @staticmethod
     def apply_colors(context, obj, colors):
         settings = context.scene.san_settings
@@ -451,15 +442,16 @@ class MESH_OT_sanmodel_import(Operator):
         if not smd:
             print("Error: No data available to create the object")
             return {'CANCELLED'}
-        for i in range(1, 2):
-            obj = smd.create_obj(context, 0, i)
-            self.apply_normals(obj, smd.segments[SAN_NORMALS], settings.swap_yz_axis)
-            # self.apply_tangents(obj, smd.segments[SAN_TANGENTS])
-            self.apply_uv0(context, obj, smd.segments[SAN_UV0])
-            self.apply_uv1(context, obj, smd.segments[SAN_UV1])
-            self.apply_uv2(context, obj, smd.segments[SAN_UV2])
-            if settings.use_vertex_colors:
-                self.apply_colors(context, obj, smd.segments[SAN_COLORS])
+        
+        # for i in range(1, 2):
+        obj = smd.create_obj(context, 0, 0)
+        self.apply_normals(obj, smd.segments[SAN_NORMALS], settings.swap_yz_axis)
+        self.apply_uv0(context, obj, smd.segments[SAN_UV0])
+        self.apply_tangents(obj, smd.segments[SAN_TANGENTS], UV0_NAME)#requires uv0
+        self.apply_uv1(context, obj, smd.segments[SAN_UV1])
+        self.apply_uv2(context, obj, smd.segments[SAN_UV2])
+        if settings.use_vertex_colors:
+            self.apply_colors(context, obj, smd.segments[SAN_COLORS])
 
         global seg_names
         for i, seg in enumerate(smd.segments):
@@ -500,6 +492,7 @@ class MESH_OT_sanmodel_export(Operator):
 
         mesh.calc_normals()
         mesh.calc_normals_split()
+        mesh.calc_tangents(uvmap=UV0_NAME)
         # mesh.calc_tessface() # obsolete
         mesh.calc_loop_triangles()
 
@@ -532,33 +525,31 @@ class MESH_OT_sanmodel_export(Operator):
             # print(normals[idx*4:idx*4+4])
         return normals
     @staticmethod
-    def extract_tangents(mesh, amount):
-        # within a face with multiple triangles, if a shared vertex has different tangents in the loops, the last one will override others
+    def extract_tangents(mesh, amount, swap_yz_axis, mirror_uv_vertically):
+        # within a face with multiple triangles, if a shared vertex has different tangents in the loops, the last one will be taken
         tangents = np.empty(amount*4, dtype=SAN_ENDIAN+"f")
         for loop in mesh.loops:
             idx = loop.vertex_index
-            # swap_yz_axis ?
-            t = []
-            t[0:] = loop.tangent[:]
-            t[3:] = [-1.0] # tmp: ask team what is the 4th value
-            tangents[idx*4:idx*4+4] = t 
+            tangents[idx*4:idx*4+3] = vecBlenderToSanmodel(loop.tangent) if swap_yz_axis else loop.tangent[:]
+            tangents[idx*4+3] = loop.bitangent_sign if (mirror_uv_vertically==swap_yz_axis) else -loop.bitangent_sign
             # print(f"extracting tangent #{idx}")
             # print(tangents[idx*4:idx*4+4])
+
+        # blender's bitangent_sign with TestCube.sanmodel (file sign is -)
+        # | swap yz | mirror uv | sign |
+        # |   Y     |     Y     |   -  |
+        # |   N     |     N     |   -  |
+        # |   Y     |     N     |   +  |
+        # |   N     |     Y     |   +  |
+        # this may be caused by the use of cross() when blender is computing tangents
+
+        # print("*********************************")
+        # print(f"tangents: {len(tangents)}")
+        # print(tangents)
+        # print("*********************************\n")
         return tangents
-        #https://blender.stackexchange.com/questions/26116/script-access-to-tangent-and-bitangent-per-face-how
-        me = bpy.context.active_object.data
-        # tangents have to be pre-calculated
-        # this will also calculate loop normal
-        me.calc_tangents()
-        # loop faces
-        for face in me.polygons:
-            # loop over face loop
-            for vert in [me.loops[i] for i in face.loop_indices]:
-                tangent = vert.tangent
-                normal = vert.normal
-                bitangent = vert.bitangent_sign * normal.cross(tangent)
     @staticmethod
-    def extract_uv(mesh, amount, name, mirror_vertically):
+    def extract_uv(mesh, amount, name, mirror_uv_vertically):
         uvmap = np.empty(amount*2, dtype=SAN_ENDIAN+"f")
         uv_layer = mesh.uv_layers.get(name)
         if not uv_layer:
@@ -568,7 +559,7 @@ class MESH_OT_sanmodel_export(Operator):
         for poly in mesh.polygons:
             for idx in poly.vertices:
                 uv = uv_layer.data[i].uv[:]
-                if mirror_vertically:
+                if mirror_uv_vertically:
                     uv = [uv[0], 1-uv[1]]
                 uvmap[idx*2:idx*2+2] = uv
                 # print(f"extracting uv #{idx}")
@@ -610,13 +601,13 @@ class MESH_OT_sanmodel_export(Operator):
                 # print(f"extracting color #{idx}")
                 # print(colors[idx*4:idx*4+4])
                 i += 1
-        print(f"colors extracted: {i}")
+        # print(f"colors extracted: {i}")
 
         colors = colors.flatten()
-        print("*********************************\n")
-        print(f"colors: {len(colors)}")
-        print(colors)
-        print("*********************************\n")
+        # print("*********************************")
+        # print(f"colors: {len(colors)}")
+        # print(colors)
+        # print("*********************************\n")
         return colors
     @staticmethod
     def extract_indices(mesh, swap_yz_axis):
@@ -652,10 +643,10 @@ class MESH_OT_sanmodel_export(Operator):
         segments = [
             self.extract_vertices(bl_mesh, settings.swap_yz_axis),
             self.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
-            self.extract_tangents(bl_mesh, len_vertices),
-            self.extract_uv(bl_mesh, len_vertices, "UV0Map", settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, "UV1Map", settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, "UV2Map", settings.mirror_uv_vertically),
+            self.extract_tangents(bl_mesh, len_vertices, settings.swap_yz_axis, settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, UV0_NAME, settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, UV1_NAME, settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, UV2_NAME, settings.mirror_uv_vertically),
             self.extract_colors(context.selected_objects[0], len_vertices),
             self.extract_indices(bl_mesh, settings.swap_yz_axis),
             self.extract_boneWeights(bl_mesh),
@@ -740,49 +731,7 @@ class MESH_OT_debug_sanmodel(Operator):
     bl_idname = "test.debug_sanmodel"
     bl_label = "debug sanmodel"
 
-    @staticmethod
-    def extract_colors(obj, mesh, amount):
-        # there should only be 1 mat per mesh
-        #https://blender.stackexchange.com/questions/122251/how-to-get-diffuse-color-of-a-material-via-python
-        if not len(obj.material_slots):
-            print(f"no material found, ignoring colors")
-            return []
-        colors = np.empty(amount*4, dtype=SAN_ENDIAN+"f")
-     
-        mat = obj.active_material
-        if not mat.use_nodes:
-            print(f"BSDF_PRINCIPLED is not used for the colors, getting 1 color for all vertices")
-            return np.array([mat.diffuse_color for i in range(0, amount)], dtype=SAN_ENDIAN+"f").flatten()
-        bsdf = mat.node_tree.nodes.get("Principled BSDF") # "Principled BSDF" is the name, "BSDF_PRINCIPLED" is the type
-        if not bsdf:
-            print(f"BSDF_PRINCIPLED is not used for the colors, ignoring colors")
-            return []
-        color_layer = mesh.vertex_colors.active
-        if not color_layer:
-            print(f"vertex color is not used for the colors, getting 1 color from BSDF_PRINCIPLED for all vertices")
-            colors = np.array([bsdf.inputs.get("Base Color").default_value[0:4] for i in range(0, amount)], dtype=SAN_ENDIAN+"f").flatten()
-            # if settings.extract_with_global_alpha: # object alpha is different from vertices alpha
-                # colors[3::4] = [bsdf.inputs.get("Alpha").default_value for i in range(0, amount)]
-            # print(colors)
-            return colors
-        
-        # within a face with multiple triangles, if a shared vertex has different colors in the polygons, the last one will override others
-        i = 0
-        for poly in mesh.polygons:
-            for idx in poly.vertices:
-                colors[idx*4:idx*4+4] = color_layer.data[i].color[:]
-                # print(f"extracting color #{idx}")
-                # print(colors[idx*4:idx*4+4])
-                i += 1
-        print(f"colors extracted: {i}")
-
-        colors = colors.flatten()
-        print("*********************************\n")
-        print(f"colors: {len(colors)}")
-        print(colors)
-        print("*********************************\n")
-        return colors
-
+ 
     def execute(self, context):
         settings = context.scene.san_settings
         if not (context.selected_objects):
@@ -790,7 +739,6 @@ class MESH_OT_debug_sanmodel(Operator):
             self.report({"INFO"}, "No object selected")
             return {'CANCELLED'}
         obj = context.selected_objects[0]
-        me = obj.data
         # uv_layer = me.uv_layers.active.data
 
         # for poly in me.polygons:
@@ -804,12 +752,15 @@ class MESH_OT_debug_sanmodel(Operator):
 
 
         #https://www.programcreek.com/python/?code=ndee85%2Fcoa_tools%2Fcoa_tools-master%2FBlender%2Fcoa_tools%2Ffunctions.py
-        mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
-        len_vertices = len(mesh.vertices)
-        arr = MESH_OT_debug_sanmodel.extract_colors(obj, mesh, len_vertices)
-        print (len(arr) / 4)
-        print(arr)
 
+        me = obj.data
+        print(f"original mesh loops: {len(me.loops)}")
+        for loop in me.loops:
+            print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
+        # mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
+        # print(f"evaluated mesh loops: {len(mesh.loops)}")
+        # for loop in mesh.loops:
+        #     print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
         return {'FINISHED'}
 
 
