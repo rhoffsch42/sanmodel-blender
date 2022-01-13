@@ -6,7 +6,7 @@
     # [✅] tangents: actually ignored, they are computed from the normals and uv0, it seams they can't be mannualy set
     #       4th value is the bitangent_sign: #https://answers.unity.com/questions/7789/calculating-tangents-vector4.html
     # [✅] uv0
-    #       todo: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
+    #       todo?: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
     # [✅] uv1
     # [✅] uv2
     # [✅] colors
@@ -17,8 +17,8 @@
     # [❌] bindposes
     #
     # EXPORT:
-    # [✅] name
-    #       set a custom name with a field in the UI?
+    # [✅] name : can set a custom name in a editable field above the export button, it updates when importing model
+    #       todo: updates when selecting object: need to store original model name and link it with the object
     # [✅] vertices
     # [✅] normals
     # [✅] tangents: swapping YZ axis or mirroring UV can invert bitangent_sign, this should be handled. cf MESH_OT_sanmodel_export.extract_tangents()
@@ -44,7 +44,7 @@
     # [❔] Colors of the TestQube are still wrong? color of each vertex is OK, the faces triangles are different from the screenshot
     #         checked the indices manually, everything seams OK. 
     # [❌] export a fbx based model, reimport the new sanmodel (fbx -> blender -> sanmodel -> blender) (rotations are not ok with the fbx importer, not our business)
-    #          the triangled mesh is ok, UV are fucked up becquse of quad faces not handled
+    #          the triangled mesh is ok, UV are fucked up because of quad faces not handled
     # [✅] export a sanmodel based model, reimport the new sanmodel (sanmodel -> blender -> sanmodel -> blender)
     #
 
@@ -221,6 +221,12 @@ class SanImportSettings(PropertyGroup):
         description="Generate shading nodes depending on previous settings (vertex_color, uv)",
         default = False
         )
+    model_name: StringProperty(
+        name="Model name",
+        description="the name of the model used when exporting",
+        default="",
+        maxlen=50,
+        )
     # my_int : IntProperty(
     #     name = "Triangles drawn",
     #     description="A integer property",
@@ -264,7 +270,7 @@ class SanmodelData():
                 print("Error with the specified file, invalid data: missing data")
                 return False
             segment_len = reinterpret_float_to_int(self.content[0]) * vars
-            print(f"{seg_names[i]} segment_len : {segment_len}")
+            print(f"{seg_names[i]}: {segment_len/seg_vars[i]}, segment_len : {segment_len} values ({segment_len*4} bytes)")
             if (segment_len):
                 print("slicing data:")
                 data = self.content[1:1+segment_len]
@@ -529,11 +535,11 @@ class MESH_OT_sanmodel_export(Operator):
         # within a face with multiple triangles, if a shared vertex has different tangents in the loops, the last one will be taken
         tangents = np.empty(amount*4, dtype=SAN_ENDIAN+"f")
         for loop in mesh.loops:
-            idx = loop.vertex_index
-            tangents[idx*4:idx*4+3] = vecBlenderToSanmodel(loop.tangent) if swap_yz_axis else loop.tangent[:]
-            tangents[idx*4+3] = loop.bitangent_sign if (mirror_uv_vertically==swap_yz_axis) else -loop.bitangent_sign
-            # print(f"extracting tangent #{idx}")
-            # print(tangents[idx*4:idx*4+4])
+            i = loop.vertex_index
+            tangents[i*4:i*4+3] = vecBlenderToSanmodel(loop.tangent) if swap_yz_axis else loop.tangent[:]
+            tangents[i*4+3] = loop.bitangent_sign if (mirror_uv_vertically==swap_yz_axis) else -loop.bitangent_sign
+            # print(f"extracting tangent #{i}")
+            # print(tangents[i*4:i*4+4])
 
         # blender's bitangent_sign with TestCube.sanmodel (file sign is -)
         # | swap yz | mirror uv | sign |
@@ -628,9 +634,8 @@ class MESH_OT_sanmodel_export(Operator):
         export_path = pathlib.Path(self.path)
         print("export as " + export_path.name)
         
-        # [name\0] it currently take the file name, make a field with custom name, or take object name
-        name = export_path.stem + "\0"
-        data = bytearray(name, "utf-8")
+        # [name\0]
+        data = bytearray(settings.model_name + "\0", "utf-8")
         # print(data)
 
         # bl_mesh = self.prepare_mesh(context, bpy.data.objects['Cube'])
@@ -702,6 +707,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
             self.report({'ERROR'}, f"Error with the specified file (see System Console for more detail)")
             return {'CANCELLED'}
         
+        settings.model_name = smd.name #export name
         settings.name = smd.name
         settings.vertices = str(len(smd.segments[SAN_VERTICES]))
         settings.normals = str(len(smd.segments[SAN_NORMALS]))
@@ -710,7 +716,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings.uv1 = str(len(smd.segments[SAN_UV1]))
         settings.uv2 = str(len(smd.segments[SAN_UV2]))
         settings.colors = str(len(smd.segments[SAN_COLORS]))
-        settings.indices = str(len(smd.segments[SAN_INDICES]))
+        settings.triangles = str(len(smd.segments[SAN_INDICES]))
         # settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
         # settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
         context.area.tag_redraw()
@@ -806,7 +812,7 @@ class VIEW_3D_PT_sanmodel_import_panel(sanmodel_panel, Panel):
             # bpy.ops.mesh.sanmodel_import(path=self.filepath)
 
         props = layout.operator("test.debug_sanmodel",
-            text = "selected objects debug",
+            text = "selected object debug",
             icon = "INFO")
 class VIEW_3D_PT_sanmodel_export_panel(sanmodel_panel, Panel):
     bl_label = "Export"
@@ -814,8 +820,10 @@ class VIEW_3D_PT_sanmodel_export_panel(sanmodel_panel, Panel):
     
     def draw(self, context):
         settings = context.scene.san_settings
+        rna_model_name = settings.bl_rna.properties["model_name"]
 
-        col = self.layout.column(align=True)
+        col = self.layout.column(align=False)
+        col.prop(settings, "model_name")
         props = col.operator("export.open_filebrowser",
             text="export",
             icon="EXPORT")
@@ -832,7 +840,8 @@ class VIEW_3D_PT_sanmodel_settings_panel(sanmodel_panel, Panel):
         rna_use_vertex_color = settings.bl_rna.properties["use_vertex_colors"]
         rna_use_alpha = settings.bl_rna.properties["use_alpha"]
         rna_shading_nodes = settings.bl_rna.properties["shading_nodes"]
-      # settings
+        
+        # settings
         #layout.prop(settings, rna_path.identifier, text=rna_path.name)
         layout.prop(settings, rna_swap_yz.identifier, text=rna_swap_yz.name)
         layout.prop(settings, rna_mirror_uv_vertically.identifier, text=rna_mirror_uv_vertically.name)
