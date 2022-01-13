@@ -153,6 +153,7 @@ def vecBlenderToSanmodel(vec):
 
 seg_names = ["vertices", "normals", "tangents", "uv0", "uv1", "uv2", "colors", "indices", "boneweights", "bindposes"]
 seg_vars = [3, 3, 4, 2, 2, 2, 4, 1, 1, 16] # cf file structure
+smd_old = None
 smd = None
 SAN_ENDIAN = "<"
 SAN_VERTICES = 0
@@ -169,8 +170,8 @@ UV0_NAME = "UV0Map"
 UV1_NAME = "UV1Map"
 UV2_NAME = "UV2Map"
 
-# int.from_bytes(b'\x00\x00\x00\xff', byteorder='big') # 255
-# int.from_bytes(b'\x00\x00\x00\xff', byteorder='little') # 4278190080
+# int.from_bytes(b"\x00\x00\x00\xff", byteorder="big") # 255
+# int.from_bytes(b"\x00\x00\x00\xff", byteorder="little") # 4278190080
 # https://docs.python.org/3/library/struct.html
 def reinterpret_float_to_int(float_value):
     return struct.unpack(SAN_ENDIAN+"i", struct.pack(SAN_ENDIAN+"f", float_value))[0]
@@ -440,14 +441,14 @@ class MESH_OT_sanmodel_import(Operator):
             node_tree.links.new(vcolor.outputs["Color"], bsdf.inputs["Base Color"]) # 0:0 = 'Base Color'
             if settings.use_alpha:
                 mat.blend_method = "BLEND"
-                node_tree.links.new(vcolor.outputs['Alpha'], bsdf.inputs['Alpha']) # 1:19 = 'Alpha'
+                node_tree.links.new(vcolor.outputs["Alpha"], bsdf.inputs["Alpha"]) # 1:19 = 'Alpha'
 
     def execute(self, context):
         settings = context.scene.san_settings
         global smd
         if not smd:
             print("Error: No data available to create the object")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
         
         # for i in range(1, 2):
         obj = smd.create_obj(context, 0, 0)
@@ -464,7 +465,7 @@ class MESH_OT_sanmodel_import(Operator):
             print("")
             print(f"{seg_names[i]}:")
             print(seg)
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 class MESH_OT_sanmodel_export(Operator):
     """export a sanmodel file"""
@@ -641,7 +642,7 @@ class MESH_OT_sanmodel_export(Operator):
         # bl_mesh = self.prepare_mesh(context, bpy.data.objects['Cube'])
         if not (context.selected_objects):
             print("no object selected")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
         bl_mesh = self.prepare_mesh(context, context.selected_objects[0])
         
         len_vertices = len(bl_mesh.vertices)
@@ -666,7 +667,7 @@ class MESH_OT_sanmodel_export(Operator):
             export_n = array_size // seg_vars[i]
             if (array_size != export_n * seg_vars[i]):
                 print(f"Error: array size is not a multiple of {seg_vars[i]}")
-                return {'CANCELLED'}
+                return {"CANCELLED"}
             barray = bytearray(s)#todo: force endian
             bn = struct.pack(SAN_ENDIAN+"i", export_n) #bytearray([export_n])
             data[len(data):] = bn
@@ -679,7 +680,7 @@ class MESH_OT_sanmodel_export(Operator):
         f = open(self.path, 'wb')
         f.write(data)
         f.close()
-        return {'FINISHED'}
+        return {"FINISHED"}
     
 class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
     bl_idname = "import.open_filebrowser"
@@ -690,12 +691,14 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings = context.scene.san_settings
         settings.valid_file = False
         global smd
+        global smd_old
+        smd_old = smd
         smd = SanmodelData()
 
         if self.filepath == "":
             print(f"'{settings.path}' not found")
             self.report({'ERROR'}, f"Error with the specified file (see System Console for more detail)")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
 
         settings.path = self.filepath
         print(f"opening '{settings.path}' ...")
@@ -705,7 +708,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings.valid_file = smd.process_data(context)
         if not settings.valid_file:
             self.report({'ERROR'}, f"Error with the specified file (see System Console for more detail)")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
         
         settings.model_name = smd.name #export name
         settings.name = smd.name
@@ -720,7 +723,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         # settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
         # settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
         context.area.tag_redraw()
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
     bl_idname = "export.open_filebrowser"
@@ -730,8 +733,39 @@ class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
     def execute(self, context):
         """Choose a name for the file to be saved"""
         bpy.ops.mesh.sanmodel_export(path=self.filepath)
-        return {'FINISHED'}
+        return {"FINISHED"}
 
+class MESH_OT_debug_diff_sanmodel(Operator):
+    """debug operator: diff for the 2 last imported .sanmodel"""
+    bl_idname = "test.debug_diff_sanmodel"
+    bl_label = "debug diff sanmodel"
+
+    @staticmethod
+    def list_numdiff(a, b):
+        len_a = len(a)
+        len_b = len(b)
+        len_min = min(len_a, len_b)
+        print(f"\tlen a: {len_a}")
+        print(f"\tlen b: {len_b}")
+        print(f"\tlen b - a: {len_b - len_a}")
+        for i in range(0, len_min):
+            if a[i] != b[i]:
+                dif = (Vector(b[i])-Vector(a[i]))[:]
+                print(f"\t{i}: {dif}")
+
+    def execute(self, context):
+        global smd
+        global smd_old
+        if smd==None or smd_old==None:
+            print("diff: {smd} and/or {smd_old} is 'None'\n")
+            return {"FINISHED"}
+        for i, e in enumerate(seg_names):
+            dif = smd.segments[i] != smd_old.segments[i]
+            if dif:
+                print(f"{seg_names[i]} diff:")
+                MESH_OT_debug_diff_sanmodel.list_numdiff(smd.segments[i], smd_old.segments[i])
+        print("checkdiff end\n")
+        return {"FINISHED"}
 class MESH_OT_debug_sanmodel(Operator):
     """debug operator for currently selected object [0]"""
     bl_idname = "test.debug_sanmodel"
@@ -743,9 +777,11 @@ class MESH_OT_debug_sanmodel(Operator):
         if not (context.selected_objects):
             print("no object selected")
             self.report({"INFO"}, "No object selected")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
+
         obj = context.selected_objects[0]
-        # uv_layer = me.uv_layers.active.data
+        me = obj.data
+        uv_layer = me.uv_layers.active.data
 
         # for poly in me.polygons:
         #     print("Polygon index: %d, length: %d" % (poly.index, poly.loop_total))
@@ -756,26 +792,25 @@ class MESH_OT_debug_sanmodel(Operator):
         #         print("    Vertex: %d" % me.loops[loop_index].vertex_index)
         #         # print("    UV: %r" % uv_layer[loop_index].uv)
 
-
         #https://www.programcreek.com/python/?code=ndee85%2Fcoa_tools%2Fcoa_tools-master%2FBlender%2Fcoa_tools%2Ffunctions.py
 
-        me = obj.data
         print(f"original mesh loops: {len(me.loops)}")
         for loop in me.loops:
             print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
-        # mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
-        # print(f"evaluated mesh loops: {len(mesh.loops)}")
-        # for loop in mesh.loops:
-        #     print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
-        return {'FINISHED'}
+        mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
+        print(f"evaluated mesh loops: {len(mesh.loops)}")
+        for loop in mesh.loops:
+            print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
+
+        return {"FINISHED"}
 
 
 #https://blender.stackexchange.com/questions/57306/how-to-create-a-custom-ui/57332#57332
 #https://www.youtube.com/watch?v=opZy2OJp8co&list=PLa1F2ddGya_8acrgoQr1fTeIuQtkSd6BW
 class sanmodel_panel:
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'sanmodel'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "sanmodel"
 class VIEW_3D_PT_sanmodel_import_panel(sanmodel_panel, Panel):
     bl_label = "Import"
     bl_idname = "SANMODEL_PANEL_PT_sanmodel_import_panel"
@@ -810,10 +845,6 @@ class VIEW_3D_PT_sanmodel_import_panel(sanmodel_panel, Panel):
                 text="Create new object",
                 icon="MESH_CUBE")
             # bpy.ops.mesh.sanmodel_import(path=self.filepath)
-
-        props = layout.operator("test.debug_sanmodel",
-            text = "selected object debug",
-            icon = "INFO")
 class VIEW_3D_PT_sanmodel_export_panel(sanmodel_panel, Panel):
     bl_label = "Export"
     bl_idname = "SANMODEL_PANEL_PT_sanmodel_export_panel"
@@ -849,6 +880,19 @@ class VIEW_3D_PT_sanmodel_settings_panel(sanmodel_panel, Panel):
         if settings.use_vertex_colors:
             layout.prop(settings, rna_use_alpha.identifier, text=rna_use_alpha.name)
         layout.prop(settings, rna_shading_nodes.identifier, text=rna_shading_nodes.name)
+class VIEW_3D_PT_sanmodel_debug_panel(sanmodel_panel, Panel):
+    bl_label = "Debug"
+    bl_idname = "SANMODEL_PANEL_PT_sanmodel_debug_panel"
+    
+    def draw(self, context):
+        settings = context.scene.san_settings
+        layout = self.layout
+        layout.operator("test.debug_sanmodel",
+            text = "selected object debug",
+            icon = "INFO")
+        layout.operator("test.debug_diff_sanmodel",
+            text = "diff of the 2 last imported .sanmodel",
+            icon = "ARROW_LEFTRIGHT")
 
 class OBJECT_OT_object_to_mesh(bpy.types.Operator):
     # https://docs.blender.org/api/current/bpy.types.Depsgraph.html
@@ -861,11 +905,11 @@ class OBJECT_OT_object_to_mesh(bpy.types.Operator):
         obj = context.object
         if obj is None:
             self.report({'INFO'}, "No active mesh object to convert to mesh")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
         # Avoid annoying None checks later on.
         if obj.type not in {'MESH', 'CURVE', 'SURFACE', 'FONT', 'META'}:
             self.report({'INFO'}, "Object can not be converted to mesh")
-            return {'CANCELLED'}
+            return {"CANCELLED"}
         depsgraph = context.evaluated_depsgraph_get()
         # Invoke to_mesh() for original object.
         mesh_from_orig = obj.to_mesh()
@@ -878,7 +922,7 @@ class OBJECT_OT_object_to_mesh(bpy.types.Operator):
         self.report({'INFO'}, f"{len(mesh_from_eval.vertices)} in new mesh with modifiers.")
         # Remove temporary mesh.
         object_eval.to_mesh_clear()
-        return {'FINISHED'}
+        return {"FINISHED"}
 
 # UI example
 # def import_menu_draw(self, context):
@@ -899,8 +943,10 @@ blender_classes = [
     VIEW_3D_PT_sanmodel_import_panel,
     VIEW_3D_PT_sanmodel_export_panel,
     VIEW_3D_PT_sanmodel_settings_panel,
+    VIEW_3D_PT_sanmodel_debug_panel,
     OBJECT_OT_object_to_mesh,
-    MESH_OT_debug_sanmodel
+    MESH_OT_debug_sanmodel,
+    MESH_OT_debug_diff_sanmodel
 ]
 
 def register():
