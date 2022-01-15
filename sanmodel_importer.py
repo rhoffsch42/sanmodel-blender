@@ -442,8 +442,7 @@ class MESH_OT_sanmodel_import(Operator):
             print("Error: No data available to create the object")
             return {"CANCELLED"}
         
-        # for i in range(1, 2):
-        obj = smd.create_obj(context, 0, 0)
+        obj = smd.create_obj(context)
         self.apply_normals(obj, smd.segments[SAN_NORMALS], settings.swap_yz_axis)
         self.apply_uv0(context, obj, smd.segments[SAN_UV0])
         self.apply_tangents(obj, smd.segments[SAN_TANGENTS], UV0_NAME)#requires uv0
