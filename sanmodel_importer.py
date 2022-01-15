@@ -310,7 +310,7 @@ class SanmodelData():
         seg_vars[SAN_INDICES] = 1
         return True
     
-    def create_obj(self, context, start, drawn):
+    def create_obj(self, context):
         settings = context.scene.san_settings
         print("building mesh...")
         mesh = bpy.data.meshes.new(self.name + "Mesh")
@@ -322,12 +322,6 @@ class SanmodelData():
             vertices = [vecSanmodelToBlender(v) for v in vertices]
             indices = [vecSanmodelToBlender(i) for i in indices]
 
-        # custom indices
-        # vert1 = start * 3
-        # vert2 = (start + drawn) * 3
-        # tri1 = start
-        # tri2 = (start + drawn)
-        # mesh.from_pydata(vertices[vert1:vert2],[],self.segments[SAN_INDICES][tri1:tri2])
         mesh.from_pydata(vertices,[],indices)
         
         mesh.update(calc_edges=True)
@@ -353,9 +347,6 @@ class MESH_OT_sanmodel_import(Operator):
     @staticmethod
     def apply_normals(obj, normals, swap_yz_axis):
         obj.data.use_auto_smooth = True # or it will not work
-        # for i, n in enumerate(normals):
-        #     normals[i] = Vector((1,1,1)).normalized()[:]
-        #     print(f"{n} -> {normals[i]}")
         used = normals[:]
         if swap_yz_axis:
             used = [vecSanmodelToBlender(n) for n in normals]
@@ -376,11 +367,8 @@ class MESH_OT_sanmodel_import(Operator):
         i = 0
         for poly in obj.data.polygons:
             for idx in poly.vertices:
-                # print(f"applying uv #{idx}")
-                # obj.data.uv_layers.active.data[i].uv = uv[idx]
                 obj.data.uv_layers[uv_name].data[i].uv = uv[idx]
                 i += 1
-        print(f"uv applied: {i}")
     @staticmethod
     def apply_uv0(context, obj, uv):
         if not len(uv):
@@ -427,10 +415,8 @@ class MESH_OT_sanmodel_import(Operator):
         i = 0
         for poly in obj.data.polygons:
             for idx in poly.vertices:
-                # print(f"applying color #{idx}")
                 color_layer.data[i].color = colors[idx]
                 i += 1
-        print(f"colors applied: {i}")
         
         if settings.shading_nodes:
             # create a mat from the vertex_color
