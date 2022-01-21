@@ -129,6 +129,7 @@ import bmesh
 from array import array
 from mathutils import (
     Vector,
+    Matrix
     )
 from bpy_extras.io_utils import (
     ImportHelper,
@@ -279,6 +280,12 @@ class SanmodelData():
             if (segment_len):
                 print("slicing data:")
                 data = self.content[1:1+segment_len]
+
+                #reinterpret indices and boneWeights data as int
+                if i == SAN_INDICES or i == SAN_BONEWEIGHTS:
+                    for j in range(len(data)):
+                        data[j] = reinterpret_float_to_int(data[j])
+
                 print(data)
                 self.segments.append(data) # will rebuild this as tuples later, could be done here
                 self.content = self.content[1+segment_len:]
@@ -292,9 +299,9 @@ class SanmodelData():
             return False
         
         #reinterpret indices and boneWeights data as int
-        for i in range(7, 9):
-            for j in range(len(self.segments[i])):
-                self.segments[i][j] = reinterpret_float_to_int(self.segments[i][j]) # and automatically recasted as float because it's a float array
+        #for i in range(7, 9):
+        #    for j in range(len(self.segments[i])):
+        #        self.segments[i][j] = reinterpret_float_to_int(self.segments[i][j]) # and automatically recasted as float because it's a float array
         
         # rebuild float arrays to tuple arrays
         # from : [0, 1, 2, 3, 4, 5, 6, 7, 8]
@@ -434,6 +441,47 @@ class MESH_OT_sanmodel_import(Operator):
             if settings.use_alpha:
                 mat.blend_method = "CLIP"
                 node_tree.links.new(vcolor.outputs["Alpha"], bsdf.inputs["Alpha"])
+    @staticmethod
+    def apply_bindposes(context, obj, data):
+        if len(data) == 0 or len(data) % 16 > 0:
+            return
+        bone_count = len(data) // 16
+        bone_matrix = [Matrix(np.array(data[x*16:(x+1)*16]).reshape(4,4).tolist()) for x in range(bone_count)]
+
+        bpy.ops.object.armature_add(align='CURSOR')
+        armature = context.active_object
+        armature.name = smd.name + 'Rig'
+        obj.parent = armature
+
+        # https://devtalk.blender.org/t/add-new-bones-to-armature/15051/3
+        bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+        edit_bones = armature.data.edit_bones
+        edit_bones.remove(edit_bones[0])
+        for i in range(bone_count):
+            bone = edit_bones.new("Bone_" + str(i))
+            bone.tail =  (0.0, 0.0, 1.0)
+            # https://developer.blender.org/diffusion/BS/browse/master/source/blender/editors/armature/armature_utils.c
+            bone.matrix = bone_matrix[i]
+        bpy.ops.object.mode_set(mode='OBJECT')
+    @staticmethod
+    def apply_boneweights(context, obj, data):
+        if len(data) == 0:
+            return
+        # active_object is now Armature, because of creation operator in apply_bindposes
+        armature = context.active_object
+
+        bone_count = len(armature.data.bones)
+        v_groups = [ [] for i in range(bone_count)]
+        for i, val in enumerate(data):
+            v_groups[int(val)].append(i)
+        for i in range(bone_count):
+            v_group = obj.vertex_groups.new(name='Bone_' + str(i))
+            v_group.add(v_groups[i], 1.0, 'ADD')
+
+        context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_add(type='ARMATURE')
+        context.object.modifiers["Armature"].object = armature
+
 
     def execute(self, context):
         settings = context.scene.san_settings
@@ -450,6 +498,8 @@ class MESH_OT_sanmodel_import(Operator):
         self.apply_uv2(context, obj, smd.segments[SAN_UV2])
         if settings.use_vertex_colors:
             self.apply_colors(context, obj, smd.segments[SAN_COLORS])
+        self.apply_bindposes(context, obj, smd.segments[SAN_BINDPOSES])
+        self.apply_boneweights(context, obj, smd.segments[SAN_BONEWEIGHTS])
 
         global seg_names
         for i, seg in enumerate(smd.segments):
@@ -603,23 +653,44 @@ class MESH_OT_sanmodel_export(Operator):
             return np.array([t.vertices[:] for t in mesh.loop_triangles], dtype=SAN_ENDIAN+"i").flatten()
 
     @staticmethod
-    def extract_boneWeights(mesh):
-        return []
+    def extract_boneWeights(armature, obj):
+        if not armature:
+            return []
+        boneweights = []
+        for v in obj.data.vertices:
+            group = sorted([(g.group, obj.vertex_groups[g.group].weight(v.index)) for g in v.groups], key=lambda tup: tup[1], reverse=True)[0]
+            boneweights.append(group[0]) if len(boneweights) > 0 else boneweights.append(0)
+        return np.array(boneweights, dtype=SAN_ENDIAN+"i").flatten()
+
     @staticmethod
-    def extract_bindposes(mesh):
-        return []
+    def extract_bindposes(armature):
+        if not armature:
+            return []
+        result = np.array([b.matrix_local[:][:] for b in armature.data.bones], dtype=SAN_ENDIAN+"f").flatten()
+        print(np.array2string(result))
+        return result 
 
     # https://blender.stackexchange.com/questions/57327/get-hard-shading-normals-in-bpy
     def execute(self, context):
+        if not (context.selected_objects):
+            print("No Object selected")
+            return {"CANCELLED"}
+
         settings = context.scene.san_settings
         export_path = pathlib.Path(self.path)
         print("export as " + export_path.name)
-        if not (context.selected_objects):
-            print("no object selected")
-            return {"CANCELLED"}
+
+        # Note: this is not compatible with exporting multiple objects! when multi export comes around, it's best to discard any selected objects that are of type armature
+        if context.selected_objects[0].type == 'ARMATURE':
+            bl_armature = context.selected_objects[0]
+            bl_obj = bl_armature.children[0]
+        else:
+            bl_obj = context.selected_objects[0]
+            bl_armature = bl_obj.find_armature()
         
         data = bytearray(settings.model_name + "\0", "utf-8") # [name\0]
-        bl_mesh = self.prepare_mesh(context, context.selected_objects[0])
+        bl_mesh = self.prepare_mesh(context, bl_obj)
+        
         len_vertices = len(bl_mesh.vertices)
         print(f"vertices: {len_vertices}")
         segments = [
@@ -629,10 +700,10 @@ class MESH_OT_sanmodel_export(Operator):
             self.extract_uv(bl_mesh, len_vertices, UV0_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, UV1_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, UV2_NAME, settings.mirror_uv_vertically),
-            self.extract_colors(context.selected_objects[0], len_vertices),
+            self.extract_colors(bl_obj, len_vertices),
             self.extract_indices(bl_mesh, settings.swap_yz_axis),
-            self.extract_boneWeights(bl_mesh),
-            self.extract_bindposes(bl_mesh),
+            self.extract_boneWeights(bl_armature, bl_obj),
+            self.extract_bindposes(bl_armature),
         ]
 
         global seg_vars
