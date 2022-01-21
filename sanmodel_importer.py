@@ -51,6 +51,7 @@
     #
     # [❌] Per object data on blender:
     #       - original import file path
+    #       - original object name
     #       - original import settings (swapYZ and mirrorUV)
 
 # File structure of a .sanmodel (4bytes numbers, except for the name 1byte per character):
@@ -614,7 +615,7 @@ class MESH_OT_sanmodel_export(Operator):
         return uvmap
 
     @staticmethod
-    def extract_colors(obj, amount):
+    def extract_colors(obj, bmesh, amount):
         # there should only be 1 mat per mesh
         # https://blender.stackexchange.com/questions/122251/how-to-get-diffuse-color-of-a-material-via-python
         if not len(obj.material_slots):
@@ -630,7 +631,7 @@ class MESH_OT_sanmodel_export(Operator):
         if not bsdf:
             print(f"BSDF_PRINCIPLED is not used for the colors, ignoring colors")
             return []
-        color_layer = obj.data.vertex_colors.active
+        color_layer = bmesh.vertex_colors.active
         if not color_layer:
             print(f"vertex color is not used for the colors, getting 1 color from BSDF_PRINCIPLED for all vertices")
             colors = np.array([bsdf.inputs.get("Base Color").default_value[0:4] for i in range(0, amount)], dtype=SAN_ENDIAN+"f").flatten()
@@ -639,7 +640,7 @@ class MESH_OT_sanmodel_export(Operator):
             return colors
         
         i = 0
-        for poly in obj.data.polygons:
+        for poly in bmesh.polygons:
             for idx in poly.vertices:
                 colors[idx*4:idx*4+4] = color_layer.data[i].color[:]
                 i += 1
@@ -700,7 +701,7 @@ class MESH_OT_sanmodel_export(Operator):
             self.extract_uv(bl_mesh, len_vertices, UV0_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, UV1_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, UV2_NAME, settings.mirror_uv_vertically),
-            self.extract_colors(bl_obj, len_vertices),
+            self.extract_colors(bl_obj, bl_mesh, len_vertices),
             self.extract_indices(bl_mesh, settings.swap_yz_axis),
             self.extract_boneWeights(bl_armature, bl_obj),
             self.extract_bindposes(bl_armature),
