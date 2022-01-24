@@ -51,7 +51,7 @@
     #
     # [❌] Per object data on blender:
     #       - original import file path
-    #       - original object name
+    #       - original object name    
     #       - original import settings (swapYZ and mirrorUV)
 
 # File structure of a .sanmodel (4bytes numbers, except for the name 1byte per character):
@@ -128,6 +128,7 @@ import bpy
 import pathlib
 import bmesh
 from array import array
+import copy
 from mathutils import (
     Vector,
     Matrix
@@ -198,8 +199,8 @@ class SanImportSettings(PropertyGroup):
     uv2 : StringProperty(name="uv2", default = "0")
     colors : StringProperty(name="colors", default = "0")
     triangles : StringProperty(name="triangles", default = "0")
-    #todo?:bindposes
-    #todo?:boneweights       
+    bindposes : StringProperty(name="bones", default = "0")
+    boneweights : StringProperty(name="boneweights", default = "0")  
     valid_file : BoolProperty(name="validation check", default = False)
     
     # user settings
@@ -452,7 +453,11 @@ class MESH_OT_sanmodel_import(Operator):
         bpy.ops.object.armature_add(align='CURSOR')
         armature = context.active_object
         armature.name = smd.name + 'Rig'
+
+        # because the armature is created at the cursor and is parent to the mesh object, the mesh object must be set to 0 location, 
+        # otherwise the cursor transform will be applied twice
         obj.parent = armature
+        obj.location = Vector((0.0, 0.0, 0.0))
 
         # https://devtalk.blender.org/t/add-new-bones-to-armature/15051/3
         bpy.ops.object.mode_set(mode='EDIT', toggle=False)
@@ -460,10 +465,16 @@ class MESH_OT_sanmodel_import(Operator):
         edit_bones.remove(edit_bones[0])
         for i in range(bone_count):
             bone = edit_bones.new("Bone_" + str(i))
-            bone.tail =  (0.0, 0.0, 1.0)
+            MESH_OT_sanmodel_import.extract_additional_bone_data(bone, bone_matrix[i])
+            print(bone_matrix[i])
+            test = bone_matrix[i]
             # https://developer.blender.org/diffusion/BS/browse/master/source/blender/editors/armature/armature_utils.c
-            bone.matrix = bone_matrix[i]
+            bone.matrix = test
         bpy.ops.object.mode_set(mode='OBJECT')
+    @staticmethod
+    def extract_additional_bone_data(bone, matrix):
+            bone.length = matrix[3][3]
+            matrix[3][3] = 1.0
     @staticmethod
     def apply_boneweights(context, obj, data):
         if len(data) == 0:
@@ -667,9 +678,17 @@ class MESH_OT_sanmodel_export(Operator):
     def extract_bindposes(armature):
         if not armature:
             return []
-        result = np.array([b.matrix_local[:][:] for b in armature.data.bones], dtype=SAN_ENDIAN+"f").flatten()
+        result = np.array([MESH_OT_sanmodel_export.inject_additional_bone_data(b) for b in armature.data.bones], dtype=SAN_ENDIAN+"f").flatten()
         print(np.array2string(result))
-        return result 
+        return result
+
+    @staticmethod
+    def inject_additional_bone_data(bone):
+        # bone.matrix_local is read only
+        # https://stackoverflow.com/questions/2612802/list-changes-unexpectedly-after-assignment-why-is-this-and-how-can-i-prevent-it
+        matrix = copy.deepcopy(bone.matrix_local)
+        matrix[3][3] = bone.length
+        return matrix
 
     # https://blender.stackexchange.com/questions/57327/get-hard-shading-normals-in-bpy
     def execute(self, context):
@@ -767,8 +786,8 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings.uv2 = str(len(smd.segments[SAN_UV2]))
         settings.colors = str(len(smd.segments[SAN_COLORS]))
         settings.triangles = str(len(smd.segments[SAN_INDICES]))
-        # settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
-        # settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
+        settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
+        settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
         context.area.tag_redraw()
         return {"FINISHED"}
 
@@ -890,8 +909,8 @@ class VIEW_3D_PT_sanmodel_import_panel(SanmodelPanel, Panel):
             details.label(text="uv2: " + settings.uv2)
             details.label(text="colors: " + settings.colors)
             details.label(text="triangles: " + settings.triangles)
-            # details.label(text="boneweights: " + settings.boneweights)
-            # details.label(text="bindposes: " + settings.bindposes)
+            details.label(text="bones: " + settings.bindposes)
+            details.label(text="boneweights: " + settings.boneweights)
 
             # create model
             layout.operator("mesh.sanmodel_import",
