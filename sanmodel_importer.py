@@ -964,6 +964,48 @@ class VIEW_3D_PT_sanmodel_debug_panel(SanmodelPanel, Panel):
         layout.operator("test.debug_diff_sanmodel",
             text = "diff of the 2 last imported .sanmodel",
             icon = "ARROW_LEFTRIGHT")
+        layout.operator("test.quick",
+            text = "quick test",
+            icon = "INFO")
+
+class quickTest(Operator):
+    """debug operator for currently selected object [0]"""
+    bl_idname = "test.quick"
+    bl_label = "quick test of things"
+
+ 
+    def execute(self, context):
+        if not (context.selected_objects):
+            print("no object selected")
+            self.report({"INFO"}, "No object selected")
+            return {"CANCELLED"}
+        if context.selected_objects[0].type == 'ARMATURE':
+            bl_armature = context.selected_objects[0]
+            bl_obj = bl_armature.children[0]
+        else:
+            bl_obj = context.selected_objects[0]
+            bl_armature = bl_obj.find_armature()
+        if not (bl_armature):
+            print("no rig!")
+            self.report({"INFO"}, "no rig!")
+            return {"CANCELLED"}
+
+        bl_obj.select_set(True)
+        bl_armature.select_set(True)
+        bpy.ops.object.duplicate()
+        if context.selected_objects[0].type == 'ARMATURE':
+            bl_armature = context.selected_objects[0]
+            bl_obj = bl_armature.children[0]
+        else:
+            bl_obj = context.selected_objects[0]
+            bl_armature = bl_obj.find_armature()
+
+        bl_armature.data.pose_position = 'REST'
+
+        
+
+        return {"FINISHED"}
+
 
 # UI example : File > import
 # def import_menu_draw(self, context):
@@ -986,7 +1028,8 @@ blender_classes = [
     VIEW_3D_PT_sanmodel_settings_panel,
     VIEW_3D_PT_sanmodel_debug_panel,
     MESH_OT_debug_sanmodel,
-    MESH_OT_debug_diff_sanmodel
+    MESH_OT_debug_diff_sanmodel,
+    quickTest
 ]
 
 def register():
