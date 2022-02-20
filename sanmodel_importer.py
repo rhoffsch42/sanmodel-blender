@@ -979,6 +979,8 @@ class quickTest(Operator):
             print("no object selected")
             self.report({"INFO"}, "No object selected")
             return {"CANCELLED"}
+        
+        # First, find out if the user selected the armature or the mesh object
         if context.selected_objects[0].type == 'ARMATURE':
             bl_armature = context.selected_objects[0]
             bl_obj = bl_armature.children[0]
@@ -990,9 +992,12 @@ class quickTest(Operator):
             self.report({"INFO"}, "no rig!")
             return {"CANCELLED"}
 
+        #clone
         bl_obj.select_set(True)
         bl_armature.select_set(True)
         bpy.ops.object.duplicate()
+        
+        #get the cloned armature and mesh
         if context.selected_objects[0].type == 'ARMATURE':
             bl_armature = context.selected_objects[0]
             bl_obj = bl_armature.children[0]
@@ -1000,10 +1005,14 @@ class quickTest(Operator):
             bl_obj = context.selected_objects[0]
             bl_armature = bl_obj.find_armature()
 
+        #turns off mesh modification of any applied animations
         bl_armature.data.pose_position = 'REST'
 
+        #todo-list (may be incomplete): 
+        # apply scale -> so the object gets exported with the right size
+        # move clone to (0,0,0)? -> I think there was an issue with object not being at the viewport origin, but not sure right now
+        # triangulate and split -> for sanmodel format. if done by operator, this should automatically assign bone weights to duplicated vertices
         
-
         return {"FINISHED"}
 
 
