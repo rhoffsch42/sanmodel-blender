@@ -3,17 +3,19 @@
     # [✅] name
     # [✅] vertices
     # [✅] normals
-    # [✅] tangents: actually ignored, they are computed from the normals and uv0, it seams they can't be manually set
+    # [✅] tangents: actually ignored, they are computed from the normals and uv1, it seams they can't be manually set
     #       4th value is the bitangent_sign: #https://answers.unity.com/questions/7789/calculating-tangents-vector4.html
-    # [✅] uv0
-    #       todo?: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
     # [✅] uv1
+    #       todo?: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
     # [✅] uv2
+    #    we removed BoneWeights array and instead bone weights (if exist) are stored in UV2.x where X is int of bone ID. There is limit to only 1 bone per vertex.
+    # [✅] uv3
     # [✅] colors
     #       imported in a vertex_colors array
     #       if "Generate shading nodes" is toggled: create a "Vertex Color" node linked to a "Principled BSDF" node
     # [✅] indices
     # [❌] boneWeights
+    #   we removed BoneWeights array and instead bone weights (if exist) are stored in UV3.x where X is int of bone ID. There is limit to only 1 bone per vertex.
     # [❌] bindposes
     #
     # EXPORT:
@@ -22,10 +24,10 @@
     # [✅] vertices
     # [✅] normals
     # [✅] tangents: swapping YZ axis or mirroring UV can invert bitangent_sign, this should be handled. cf MESH_OT_sanmodel_export.extract_tangents()
-    # [✅] uv0: export the uv_layer named "UV0Map"
     # [✅] uv1: export the uv_layer named "UV1Map"
     # [✅] uv2: export the uv_layer named "UV2Map"
-    # note: uv_layers are linked to their object, they are not global. Every object can have its own uv_layer named "UV0Map" for example
+    # [✅] uv3: export the uv_layer named "UV3Map"
+    # note: uv_layers are linked to their object, they are not global. Every object can have its own uv_layer named "UV1Map" for example
     # 
     # [✅] colors
     #       ✅ when no material is found: ignore colors, even if it has a vertex_colors array
@@ -51,8 +53,10 @@
     #
     # [❌] Per object data on blender:
     #       - original import file path
-    #       - original object name    
+    #       - original object name
     #       - original import settings (swapYZ and mirrorUV)
+    #
+
 
 # File structure of a .sanmodel (4bytes numbers, except for the name 1byte per character):
     # |-----------------------------------------------------------------------------------------
@@ -65,18 +69,16 @@
     # | normals array             |  4 * normals amount * 3
     # | tangents amount           |  4
     # | tangents array            |  4 * tangents amount * 4
-    # | uv0 amount                |  4
-    # | uv0 array                 |  4 * uv0 amount * 2
     # | uv1 amount                |  4
     # | uv1 array                 |  4 * uv1 amount * 2
     # | uv2 amount                |  4
     # | uv2 array                 |  4 * uv2 amount * 2
+    # | uv3 amount                |  4
+    # | uv3 array                 |  4 * uv3 amount * 2
     # | colors amount             |  4
     # | colors array              |  4 * colors amount * 4
     # | triangles indices amount  |  4
     # | triangles indices array   |  4 * triangles indices amount
-    # | boneWeights amount        |  4
-    # | boneWeights array         |  4 * boneWeights amount
     # | bindposes amount          |  4
     # | bindposes array           |  4 * bindposes amount * 16
     # |-----------------------------------------------------------------------------------------
@@ -85,24 +87,22 @@
     # [vertices n][array of n*3]
     # [normals n][array of n*3]
     # [tangents n][array of n*4]
-    # [uv0 n][array of n*2]
     # [uv1 n][array of n*2]
     # [uv2 n][array of n*2]
+    # [uv3 n][array of n*2]
     # [colors n][array of n*4]
     # [indices n][array of n*1]
-    # [boneWeights n][array of n*1]
     # [bindposes n][array of n*16]
     #
     # mesh segments and initial variable type from Unity C#
     # vertices      Vector3 float
     # normals       Vector3 float
     # tangents      Vector4 float
-    # uv0           Vector2 float
     # uv1           Vector2 float
     # uv2           Vector2 float
+    # uv3           Vector2 float
     # colors        rgba float
     # indices       int
-    # boneWeights   int
     # bindposes     matrix4x4 = 4xVector4 float
 
 bl_info = {
@@ -153,35 +153,55 @@ from bpy.props import (StringProperty,
                        PointerProperty,
                        )
 
+CONSOLE_DEBUG = False
+CONSOLE_DEBUG_DATA = False
+def console_debug(*args):
+    if CONSOLE_DEBUG:
+        for x in args:
+            print(x)
+def console_debug_data(*args):
+    if CONSOLE_DEBUG:
+        if CONSOLE_DEBUG_DATA:
+            for x in args:
+                print(x)
+        else:
+            print("[...]")
 def vecSanmodelToBlender(vec):
     return (vec[0], vec[2], vec[1])
 def vecBlenderToSanmodel(vec):
     return (vec[0], vec[2], vec[1])
 
-seg_names = ["vertices", "normals", "tangents", "uv0", "uv1", "uv2", "colors", "indices", "boneweights", "bindposes"]
-seg_vars = [3, 3, 4, 2, 2, 2, 4, 1, 1, 16] # cf file structure
+#seg_names = ["vertices", "normals", "tangents", "uv1", "uv2", "uv3", "colors", "indices", "boneweights", "bindposes"]
+seg_names = ["vertices", "normals", "tangents", "uv1", "uv2", "uv3", "colors", "indices", "bindposes"]
+#seg_vars = [3, 3, 4, 2, 2, 2, 4, 1, 1, 16] # cf file structure
+seg_vars = [3, 3, 4, 2, 2, 2, 4, 1, 16] # cf file structure
 smd_old = None
 smd = None
 SAN_ENDIAN = "<"
 SAN_VERTICES = 0
 SAN_NORMALS = 1
 SAN_TANGENTS = 2
-SAN_UV0 = 3
-SAN_UV1 = 4
-SAN_UV2 = 5
+SAN_UV1 = 3
+SAN_UV2 = 4
+SAN_UV3 = 5
 SAN_COLORS = 6
 SAN_INDICES = 7
-SAN_BONEWEIGHTS = 8
-SAN_BINDPOSES = 9
-UV0_NAME = "UV0Map"
+#SAN_BONEWEIGHTS = 8
+#SAN_BINDPOSES = 9
+SAN_BINDPOSES = 8
 UV1_NAME = "UV1Map"
 UV2_NAME = "UV2Map"
+UV3_NAME = "UV3Map"
 
 # int.from_bytes(b"\x00\x00\x00\xff", byteorder="big") # 255
 # int.from_bytes(b"\x00\x00\x00\xff", byteorder="little") # 4278190080
 # https://docs.python.org/3/library/struct.html
 def reinterpret_float_to_int(float_value):
     return struct.unpack(SAN_ENDIAN+"i", struct.pack(SAN_ENDIAN+"f", float_value))[0]
+def uv_to_boneweights(uv_array):
+    # uv are tuples of 2 float values
+    return [e[0] for e in uv_array]
+
 
 class SanImportSettings(PropertyGroup):
     # internal properties
@@ -195,8 +215,8 @@ class SanImportSettings(PropertyGroup):
     normals : StringProperty(name="normals", default = "0")
     tangents : StringProperty(name="tangents", default = "0")
     uv : StringProperty(name="uv", default = "0")
-    uv1 : StringProperty(name="uv1", default = "0")
     uv2 : StringProperty(name="uv2", default = "0")
+    uv3 : StringProperty(name="uv3", default = "0")
     colors : StringProperty(name="colors", default = "0")
     triangles : StringProperty(name="triangles", default = "0")
     bindposes : StringProperty(name="bones", default = "0")
@@ -235,13 +255,6 @@ class SanImportSettings(PropertyGroup):
         default="",
         maxlen=50,
         )
-    # my_int : IntProperty(
-    #     name = "Triangles drawn",
-    #     description="A integer property",
-    #     default = 23,
-    #     min = 10,
-    #     max = 100
-    #     )
 
 class SanmodelData():
     content: bytes
@@ -263,9 +276,9 @@ class SanmodelData():
             print("Error with the specified file, invalid data: should be only 4 bytes number after the null terminated name")
             return False
 
-        print("---------------- File content (without the name) -----------------")
-        print(self.content)
-        print("---------------- END ---------------------------------------------")
+        console_debug("---------------- File content (without the name) -----------------")
+        console_debug_data(self.content)
+        console_debug("---------------- END ---------------------------------------------")
         # convert bytes to floats
         self.content = np.array(list(struct.iter_unpack(SAN_ENDIAN+"f", self.content[0:content_len])), dtype=float).flatten()
         
@@ -278,24 +291,25 @@ class SanmodelData():
                 print("Error with the specified file, invalid data: missing data")
                 return False
             segment_len = reinterpret_float_to_int(self.content[0]) * vars
-            print(f"{seg_names[i]}: {segment_len/seg_vars[i]}, segment_len : {segment_len} values ({segment_len*4} bytes)")
+            console_debug(f"{seg_names[i]}: {segment_len/seg_vars[i]}, segment_len : {segment_len} values ({segment_len*4} bytes)")
             if (segment_len):
-                print("slicing data:")
+                console_debug("slicing data:")
                 data = self.content[1:1+segment_len]
 
                 #reinterpret indices and boneWeights data as int
-                if i == SAN_INDICES or i == SAN_BONEWEIGHTS:
+                if i == SAN_INDICES:
                     for j in range(len(data)):
                         data[j] = reinterpret_float_to_int(data[j])
 
-                print(data)
+                console_debug_data(data)
                 self.segments.append(data) # will rebuild this as tuples later, could be done here
                 self.content = self.content[1+segment_len:]
             else:
-                print("slicing nothing")
+                console_debug("slicing nothing")
                 self.content = self.content[1:]
                 self.segments.append([])
-        print("data left: ", self.content)
+        console_debug("data left: ")
+        console_debug_data(self.content)
         if len(self.content):
             print("Error with the specified file, invalid data: slicing left some data, this shouldn't be the case.")
             return False
@@ -310,7 +324,7 @@ class SanmodelData():
         # to : [(0, 1, 2), (3, 4, 5), (6, 7, 8)]
         # tuple len is seg_vars[i]
         seg_vars[SAN_INDICES] = 3 # group indices as tuple(1,2,3) for 1 triangle/face
-        r = len(seg_vars) - 2 # for now, ignore the 2 last
+        r = len(seg_vars) - 1 # for now, ignore the last one (bindposes) 
         for i in range(r):
             tmp = []
             for j in range(len(self.segments[i])//seg_vars[i]):
@@ -363,7 +377,7 @@ class MESH_OT_sanmodel_import(Operator):
         obj.data.calc_normals_split()
     @staticmethod
     def apply_tangents(obj, tangents, uvname):
-        if obj.data.uv_layers.get(UV0_NAME):
+        if obj.data.uv_layers.get(UV1_NAME):
             obj.data.calc_tangents(uvmap=uvname)
         # they are computed from the normals and uv map, then stored in the loops
         # can't manually set tangents? maybe to avoid having an invalid tengant space
@@ -379,35 +393,14 @@ class MESH_OT_sanmodel_import(Operator):
                 obj.data.uv_layers[uv_name].data[i].uv = uv[idx]
                 i += 1
     @staticmethod
-    def apply_uv0(context, obj, uv):
-        if not len(uv):
+    def apply_uv(context, obj, uv_array, uv_name):
+        if not len(uv_array):
             return
         settings = context.scene.san_settings
-        used = uv
+        used = uv_array
         if settings.mirror_uv_vertically:
-            used = [(e[0], 1-e[1]) for e in uv]
-        MESH_OT_sanmodel_import.create_uv_layer(obj, UV0_NAME, used)
-
-        if settings.shading_nodes:#cf shader-nodes-2.png
-            pass
-    @staticmethod
-    def apply_uv1(context, obj, uv):
-        if not len(uv):
-            return
-        settings = context.scene.san_settings
-        used = uv
-        if settings.mirror_uv_vertically:
-            used = [(e[0], 1-e[1]) for e in uv]
-        MESH_OT_sanmodel_import.create_uv_layer(obj, UV1_NAME, used)
-    @staticmethod
-    def apply_uv2(context, obj, uv):
-        if not len(uv):
-            return
-        settings = context.scene.san_settings
-        used = uv
-        if settings.mirror_uv_vertically:
-            used = [(e[0], 1-e[1]) for e in uv]
-        MESH_OT_sanmodel_import.create_uv_layer(obj, UV2_NAME, used)
+            used = [(e[0], 1-e[1]) for e in uv_array]
+        MESH_OT_sanmodel_import.create_uv_layer(obj, uv_name, used)
     @staticmethod
     def apply_colors(context, obj, colors):
         settings = context.scene.san_settings
@@ -466,7 +459,7 @@ class MESH_OT_sanmodel_import(Operator):
         for i in range(bone_count):
             bone = edit_bones.new("Bone_" + str(i))
             MESH_OT_sanmodel_import.extract_additional_bone_data(bone, bone_matrix[i])
-            print(bone_matrix[i])
+            console_debug_data(bone_matrix[i])
             test = bone_matrix[i]
             # https://developer.blender.org/diffusion/BS/browse/master/source/blender/editors/armature/armature_utils.c
             bone.matrix = test
@@ -494,30 +487,32 @@ class MESH_OT_sanmodel_import(Operator):
         bpy.ops.object.modifier_add(type='ARMATURE')
         context.object.modifiers["Armature"].object = armature
 
-
     def execute(self, context):
         settings = context.scene.san_settings
         global smd
         if not smd:
             print("Error: No data available to create the object")
             return {"CANCELLED"}
-        
-        obj = smd.create_obj(context)
-        self.apply_normals(obj, smd.segments[SAN_NORMALS], settings.swap_yz_axis)
-        self.apply_uv0(context, obj, smd.segments[SAN_UV0])
-        self.apply_tangents(obj, smd.segments[SAN_TANGENTS], UV0_NAME)#requires uv0
-        self.apply_uv1(context, obj, smd.segments[SAN_UV1])
-        self.apply_uv2(context, obj, smd.segments[SAN_UV2])
-        if settings.use_vertex_colors:
-            self.apply_colors(context, obj, smd.segments[SAN_COLORS])
-        self.apply_bindposes(context, obj, smd.segments[SAN_BINDPOSES])
-        self.apply_boneweights(context, obj, smd.segments[SAN_BONEWEIGHTS])
 
         global seg_names
         for i, seg in enumerate(smd.segments):
-            print("")
-            print(f"{seg_names[i]}:")
-            print(seg)
+            console_debug("")
+            console_debug(f"{i}: {seg_names[i]}:")
+            console_debug(f"seg len: {len(seg)}")
+            # console_debug_data(seg)
+        # return {"FINISHED"}
+
+        obj = smd.create_obj(context)
+        self.apply_normals(obj, smd.segments[SAN_NORMALS], settings.swap_yz_axis)
+        self.apply_uv(context, obj, smd.segments[SAN_UV1], UV1_NAME)
+        self.apply_tangents(obj, smd.segments[SAN_TANGENTS], UV1_NAME) # requires uv1
+        # self.apply_uv(context, obj, smd.segments[SAN_UV2], UV2_NAME) # these are in fact boneweights
+        self.apply_uv(context, obj, smd.segments[SAN_UV3], UV3_NAME)
+        if settings.use_vertex_colors:
+            self.apply_colors(context, obj, smd.segments[SAN_COLORS])
+        self.apply_bindposes(context, obj, smd.segments[SAN_BINDPOSES])
+        self.apply_boneweights(context, obj, uv_to_boneweights(smd.segments[SAN_UV2]))
+        print("Object created")
         return {"FINISHED"}
 
 class MESH_OT_sanmodel_export(Operator):
@@ -560,8 +555,8 @@ class MESH_OT_sanmodel_export(Operator):
 
         mesh.calc_normals()
         mesh.calc_normals_split()
-        if mesh.uv_layers.get(UV0_NAME):
-            mesh.calc_tangents(uvmap=UV0_NAME)
+        if mesh.uv_layers.get(UV1_NAME):
+            mesh.calc_tangents(uvmap=UV1_NAME)
         mesh.calc_loop_triangles()
 
         # https://blender.stackexchange.com/questions/31738/how-to-fix-outdated-internal-index-table-in-an-addon
@@ -629,11 +624,13 @@ class MESH_OT_sanmodel_export(Operator):
     def extract_colors(obj, bmesh, amount):
         # there should only be 1 mat per mesh
         # https://blender.stackexchange.com/questions/122251/how-to-get-diffuse-color-of-a-material-via-python
-        if not len(obj.material_slots):
+        
+        # if not len(obj.material_slots):
+        if not obj.active_material:
             print(f"no material found, ignoring colors")
             return []
+        
         colors = np.empty(amount*4, dtype=SAN_ENDIAN+"f")
-     
         mat = obj.active_material
         if not mat.use_nodes:
             print(f"BSDF_PRINCIPLED is not used for the colors, getting 1 color for all vertices")
@@ -677,9 +674,10 @@ class MESH_OT_sanmodel_export(Operator):
     @staticmethod
     def extract_bindposes(armature):
         if not armature:
+            console_debug("no armature found")
             return []
         result = np.array([MESH_OT_sanmodel_export.inject_additional_bone_data(b) for b in armature.data.bones], dtype=SAN_ENDIAN+"f").flatten()
-        print(np.array2string(result))
+        console_debug_data(np.array2string(result))
         return result
 
     @staticmethod
@@ -712,17 +710,17 @@ class MESH_OT_sanmodel_export(Operator):
         bl_mesh = self.prepare_mesh(context, bl_obj)
         
         len_vertices = len(bl_mesh.vertices)
-        print(f"vertices: {len_vertices}")
+        console_debug(f"vertices: {len_vertices}")
         segments = [
             self.extract_vertices(bl_mesh, settings.swap_yz_axis),
             self.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
             self.extract_tangents(bl_mesh, len_vertices, settings.swap_yz_axis, settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, UV0_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, UV1_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, UV2_NAME, settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, UV3_NAME, settings.mirror_uv_vertically),
             self.extract_colors(bl_obj, bl_mesh, len_vertices),
             self.extract_indices(bl_mesh, settings.swap_yz_axis),
-            self.extract_boneWeights(bl_armature, bl_obj),
+            # self.extract_boneWeights(bl_armature, bl_obj), # now in uv3.x
             self.extract_bindposes(bl_armature),
         ]
 
@@ -731,21 +729,22 @@ class MESH_OT_sanmodel_export(Operator):
         for i, s in enumerate(segments):
             array_size = len(s)
             export_n = array_size // seg_vars[i]
+            console_debug(f"segment[{i}] : {seg_names[i]} : {export_n} elements for {array_size} numbers")
             if (array_size != export_n * seg_vars[i]):
                 print(f"Error: array size is not a multiple of {seg_vars[i]}")
                 return {"CANCELLED"}
-            barray = bytearray(s)#todo: force endian
             bn = struct.pack(SAN_ENDIAN+"i", export_n) #bytearray([export_n])
+            barray = bytearray(s)#todo: force endian
             data[len(data):] = bn
             data[len(data):] = barray
-            print(f"segment {seg_names[i]} : {export_n} elements for {array_size} numbers")
-            print(bn)
-            print(barray)
-        print("\nexport full data:")
-        print(data)
+            # console_debug_data(bn)
+            # console_debug_data(barray)
+        console_debug("\nexport full data:")
+        console_debug_data(data)
         f = open(self.path, 'wb')
         f.write(data)
         f.close()
+        print("export done")
         return {"FINISHED"}
     
 class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
@@ -781,14 +780,15 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings.vertices = str(len(smd.segments[SAN_VERTICES]))
         settings.normals = str(len(smd.segments[SAN_NORMALS]))
         settings.tangents = str(len(smd.segments[SAN_TANGENTS]))
-        settings.uv = str(len(smd.segments[SAN_UV0]))
-        settings.uv1 = str(len(smd.segments[SAN_UV1]))
+        settings.uv = str(len(smd.segments[SAN_UV1]))
         settings.uv2 = str(len(smd.segments[SAN_UV2]))
+        settings.uv3 = str(len(smd.segments[SAN_UV3]))
         settings.colors = str(len(smd.segments[SAN_COLORS]))
         settings.triangles = str(len(smd.segments[SAN_INDICES]))
         settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
-        settings.boneweights = str(len(smd.segments[SAN_BONEWEIGHTS]))
+        settings.boneweights = str(len(smd.segments[SAN_UV2]))
         context.area.tag_redraw()
+        print("import done, you can create a blender object with the button 'Create new object'")
         return {"FINISHED"}
 
 class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
@@ -811,26 +811,26 @@ class MESH_OT_debug_diff_sanmodel(Operator):
         len_a = len(a)
         len_b = len(b)
         len_min = min(len_a, len_b)
-        print(f"\tlen a: {len_a}")
-        print(f"\tlen b: {len_b}")
-        print(f"\tlen b - a: {len_b - len_a}")
+        console_debug(f"\tlen a: {len_a}")
+        console_debug(f"\tlen b: {len_b}")
+        console_debug(f"\tlen b - a: {len_b - len_a}")
         for i in range(0, len_min):
             if a[i] != b[i]:
                 dif = (Vector(b[i])-Vector(a[i]))[:]
-                print(f"\t{i}: {dif}")
+                console_debug(f"\t{i}: {dif}")
 
     def execute(self, context):
         global smd
         global smd_old
         if smd==None or smd_old==None:
-            print("diff: {smd} and/or {smd_old} is 'None'\n")
+            console_debug("diff: {smd} and/or {smd_old} is 'None'\n")
             return {"FINISHED"}
         for i, e in enumerate(seg_names):
             dif = smd.segments[i] != smd_old.segments[i]
             if dif:
-                print(f"{seg_names[i]} diff:")
+                console_debug(f"{seg_names[i]} diff:")
                 MESH_OT_debug_diff_sanmodel.list_numdiff(smd.segments[i], smd_old.segments[i])
-        print("checkdiff end\n")
+        console_debug("checkdiff end\n")
         return {"FINISHED"}
 class MESH_OT_debug_sanmodel(Operator):
     """debug operator for currently selected object [0]"""
@@ -850,31 +850,31 @@ class MESH_OT_debug_sanmodel(Operator):
         uv_layer = me.uv_layers.active.data
 
         # for poly in me.polygons:
-        #     print("Polygon index: %d, length: %d" % (poly.index, poly.loop_total))
+        #     console_debug("Polygon index: %d, length: %d" % (poly.index, poly.loop_total))
 
         #     # range is used here to show how the polygons reference loops,
         #     # for convenience 'poly.loop_indices' can be used instead.
         #     for loop_index in range(poly.loop_start, poly.loop_start + poly.loop_total):
-        #         print("    Vertex: %d" % me.loops[loop_index].vertex_index)
-        #         # print("    UV: %r" % uv_layer[loop_index].uv)
+        #         console_debug("    Vertex: %d" % me.loops[loop_index].vertex_index)
+        #         # console_debug("    UV: %r" % uv_layer[loop_index].uv)
 
-        print(f"original mesh polygons: {len(me.polygons)}")
-        print(f"original mesh uv_layer ({me.uv_layers.active.name}): {len(me.uv_layers.active.data)}")
-        print(f"original mesh vertices: {len(me.vertices)}")
-        print(f"original mesh loops: {len(me.loops)}")
+        console_debug(f"original mesh polygons: {len(me.polygons)}")
+        console_debug(f"original mesh uv_layer ({me.uv_layers.active.name}): {len(me.uv_layers.active.data)}")
+        console_debug(f"original mesh vertices: {len(me.vertices)}")
+        console_debug(f"original mesh loops: {len(me.loops)}")
         # for loop in me.loops:
-            # print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
-        # print([e.uv[:] for e in me.uv_layers.active.data])
-        print("- - -")
+            # console_debug(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
+        # console_debug([e.uv[:] for e in me.uv_layers.active.data])
+        console_debug("- - -")
         mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
-        print(f"evaluated mesh polygons: {len(mesh.polygons)}")
-        print(f"evaluated mesh uv_layer ({mesh.uv_layers.active.name}): {len(mesh.uv_layers.active.data)}")
-        print(f"evaluated mesh vertices: {len(mesh.vertices)}")
-        print(f"evaluated mesh loops: {len(mesh.loops)}")
+        console_debug(f"evaluated mesh polygons: {len(mesh.polygons)}")
+        console_debug(f"evaluated mesh uv_layer ({mesh.uv_layers.active.name}): {len(mesh.uv_layers.active.data)}")
+        console_debug(f"evaluated mesh vertices: {len(mesh.vertices)}")
+        console_debug(f"evaluated mesh loops: {len(mesh.loops)}")
         # for loop in mesh.loops:
-            # print(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
-        # print([e.uv[:] for e in mesh.uv_layers.active.data])
-        print("--------------")
+            # console_debug(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
+        # console_debug([e.uv[:] for e in mesh.uv_layers.active.data])
+        console_debug("--------------")
         return {"FINISHED"}
 
 #https://blender.stackexchange.com/questions/57306/how-to-create-a-custom-ui/57332#57332
@@ -905,8 +905,8 @@ class VIEW_3D_PT_sanmodel_import_panel(SanmodelPanel, Panel):
             details.label(text="normals: " + settings.normals)
             details.label(text="tangents: " + settings.tangents)
             details.label(text="uv: " + settings.uv)
-            details.label(text="uv1: " + settings.uv1)
             details.label(text="uv2: " + settings.uv2)
+            details.label(text="uv3: " + settings.uv3)
             details.label(text="colors: " + settings.colors)
             details.label(text="triangles: " + settings.triangles)
             details.label(text="bones: " + settings.bindposes)
@@ -984,9 +984,9 @@ blender_classes = [
     VIEW_3D_PT_sanmodel_import_panel,
     VIEW_3D_PT_sanmodel_export_panel,
     VIEW_3D_PT_sanmodel_settings_panel,
-    VIEW_3D_PT_sanmodel_debug_panel,
-    MESH_OT_debug_sanmodel,
-    MESH_OT_debug_diff_sanmodel
+   # VIEW_3D_PT_sanmodel_debug_panel,
+   # MESH_OT_debug_sanmodel,
+   # MESH_OT_debug_diff_sanmodel
 ]
 
 def register():
