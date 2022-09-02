@@ -232,7 +232,7 @@ class SanImportSettings(PropertyGroup):
     mirror_uv_vertically : BoolProperty(
         name="Mirror UV vertically",
         description="Blender handle some textures differently.",
-        default = True
+        default = False
         )
     use_vertex_colors : BoolProperty(
         name="Use vertex colors",
