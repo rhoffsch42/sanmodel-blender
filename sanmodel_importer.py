@@ -331,6 +331,9 @@ class SanmodelData():
                 tmp.append(tuple(self.segments[i][j*seg_vars[i]:j*seg_vars[i]+seg_vars[i]]))
             self.segments[i] = tmp
         seg_vars[SAN_INDICES] = 1
+
+        # SAN_INDICES: convert tuple(float,float,float) to tuple(int,int,int)
+        self.segments[SAN_INDICES] = [tuple(map(int, t)) for t in self.segments[SAN_INDICES]]
         return True
     
     def create_obj(self, context):
