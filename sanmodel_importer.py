@@ -8,14 +8,17 @@
     # [✅] uv1
     #       todo?: create the shading nodes, set the transparency "clip", change base color input as texture data, link everything (cf shader-nodes-2.png)
     # [✅] uv2
-    #    we removed BoneWeights array and instead bone weights (if exist) are stored in UV2.x where X is int of bone ID. There is limit to only 1 bone per vertex.
+    #   Sanctuary team:
+    #    "we removed BoneWeights array and instead bone weights (if exist) are stored in UV2.x where X is int of bone ID. There is limit to only 1 bone per vertex."
+    #    "some things like props can have additional UV data used for shaders. Only skinned meshes use uv2.x as skinning data"
     # [✅] uv3
     # [✅] colors
     #       imported in a vertex_colors array
     #       if "Generate shading nodes" is toggled: create a "Vertex Color" node linked to a "Principled BSDF" node
     # [✅] indices
     # [❌] boneWeights
-    #   we removed BoneWeights array and instead bone weights (if exist) are stored in UV3.x where X is int of bone ID. There is limit to only 1 bone per vertex.
+    #   Sanctuary team:
+    #    "we removed BoneWeights array and instead bone weights (if exist) are stored in UV3.x where X is int of bone ID. There is limit to only 1 bone per vertex."
     # [❌] bindposes
     #
     # EXPORT:
@@ -110,7 +113,7 @@ bl_info = {
     "category": "Import-Export",
     "description": "Import or export a .sanmodel file, which is a model for the RTS game Sanctuary.",
     "version": (0, 1),
-    "blender": (2, 93, 6),
+    "blender": (3, 2, 0),
     "warning": "Work in progress",
     "support": "COMMUNITY",
     "author": "Ater Omen <Dicord: Ater Omen#0791>, Slakxs <Discord: Slakxs#2649>",
@@ -154,7 +157,7 @@ from bpy.props import (StringProperty,
                        )
 
 CONSOLE_DEBUG = False
-CONSOLE_DEBUG_DATA = False
+CONSOLE_DEBUG_DATA = True
 def console_debug(*args):
     if CONSOLE_DEBUG:
         for x in args:
@@ -208,7 +211,8 @@ class SanImportSettings(PropertyGroup):
     path : StringProperty(
         name="sanmodel path",
         description="the path of the sanmodel",
-        default = "..."
+        default = "...",
+        options={'SKIP_SAVE'}
         )
     name : StringProperty(name="name", default = "...")
     vertices : StringProperty(name="vertices", default = "0")
@@ -478,6 +482,8 @@ class MESH_OT_sanmodel_import(Operator):
         # active_object is now Armature, because of creation operator in apply_bindposes
         armature = context.active_object
 
+        console_debug_data("bone data")
+        console_debug_data(data)
         bone_count = len(armature.data.bones)
         v_groups = [ [] for i in range(bone_count)]
         for i, val in enumerate(data):
@@ -514,7 +520,10 @@ class MESH_OT_sanmodel_import(Operator):
         if settings.use_vertex_colors:
             self.apply_colors(context, obj, smd.segments[SAN_COLORS])
         self.apply_bindposes(context, obj, smd.segments[SAN_BINDPOSES])
-        self.apply_boneweights(context, obj, uv_to_boneweights(smd.segments[SAN_UV2]))
+        if (not len(smd.segments[SAN_BINDPOSES]) and len(smd.segments[SAN_UV2])):
+            console_debug("Model has no bindposes. Ignoring segments SAN_UV2 (boneweights).")
+        else:
+            self.apply_boneweights(context, obj, uv_to_boneweights(smd.segments[SAN_UV2]))
         print("Object created")
         return {"FINISHED"}
 
@@ -796,7 +805,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
 
 class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
     bl_idname = "export.open_filebrowser"
-    bl_label = "Open"
+    bl_label = "Save"
 
     filename_ext = ".sanmodel"
     def execute(self, context):
@@ -897,8 +906,9 @@ class VIEW_3D_PT_sanmodel_import_panel(SanmodelPanel, Panel):
         # import button
         box = layout.box()
         box.operator("import.open_filebrowser",
-            text=settings.path,
-            icon="IMPORT")
+            text = settings.path,
+            icon = "IMPORT",
+            )
 
         # details
         if settings.valid_file and smd:
