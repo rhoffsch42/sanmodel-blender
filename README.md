@@ -2,7 +2,7 @@
 A Blender addon to import/export sanmodel files. This is a Work In Progress. 
 
 ## Install
-1. Download sanmodel_importer.py
+1. Download sanmodel_importer.zip
 2. On Blender: Edit > Preferences > Add-ons : click the button "Install..." and select the downloaded file. The add-on will appear on the list, its name is "Sanctuary model importer/exporter", make sure it is enabled by checking its box.
 3. The add-on should be installed and loaded, but you can force a reload if needed: click on the Blender logo > System > Reload Scripts.
 
