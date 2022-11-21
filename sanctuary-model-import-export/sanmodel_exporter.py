@@ -106,11 +106,11 @@ class MESH_OT_sanmodel_export(Operator):
 
     @staticmethod
     def extract_uv(mesh, amount, name, mirror_uv_vertically):
-        uvmap = np.empty(amount*2, dtype=S.SAN_ENDIAN+"f")
         uv_layer = mesh.uv_layers.get(name)
         if not uv_layer:
-            print(f"uv_layer '{name}' not found")
-            return []#todo: report UV not found
+            #print(f"uv_layer '{name}' not found")
+            return []
+        uvmap = np.empty(amount*2, dtype=S.SAN_ENDIAN+"f")
         i = 0
         for poly in mesh.polygons:
             for idx in poly.vertices:
@@ -212,13 +212,23 @@ class MESH_OT_sanmodel_export(Operator):
         
         len_vertices = len(bl_mesh.vertices)
         console_debug(f"vertices: {len_vertices}")
+
+        console_debug(f"# grabbing uv_layers names (same order as in the UI)")
+        uv_names = ["0", "1", "2"]
+        for i, l in enumerate(bl_mesh.uv_layers):
+            uv_names[i] = l.name
+            console_debug(f"found UV layer: {l.name}")
+
         segments = [
             self.extract_vertices(bl_mesh, settings.swap_yz_axis),
             self.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
             self.extract_tangents(bl_mesh, len_vertices, settings.swap_yz_axis, settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, S.UV1_NAME, settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, S.UV2_NAME, settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, S.UV3_NAME, settings.mirror_uv_vertically),
+            # self.extract_uv(bl_mesh, len_vertices, S.UV1_NAME, settings.mirror_uv_vertically),
+            # self.extract_uv(bl_mesh, len_vertices, S.UV2_NAME, settings.mirror_uv_vertically),
+            # self.extract_uv(bl_mesh, len_vertices, S.UV3_NAME, settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, uv_names[0], settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, uv_names[1], settings.mirror_uv_vertically),
+            self.extract_uv(bl_mesh, len_vertices, uv_names[2], settings.mirror_uv_vertically),
             self.extract_colors(bl_obj, bl_mesh, len_vertices),
             self.extract_indices(bl_mesh, settings.swap_yz_axis),
             # self.extract_boneWeights(bl_armature, bl_obj), # now in uv3.x

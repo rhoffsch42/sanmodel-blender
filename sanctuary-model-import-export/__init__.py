@@ -1,9 +1,8 @@
-
 bl_info = {
     "name": "Sanctuary model importer/exporter",
     "category": "Import-Export",
     "description": "Import or export a .sanmodel file, which is a model for the RTS game Sanctuary.",
-    "version": (0, 2),
+    "version": (0, 3),
     "blender": (3, 2, 0),
     "warning": "Work in progress",
     "support": "COMMUNITY",
@@ -32,12 +31,12 @@ modules = [
 def register():
     for m in modules:
         m.register()
-    print("sanmodel package registered")
+    print(f"sanmodel v0.3 package registered")
 
 def unregister():
     for m in modules:
         m.unregister()
-    print("sanmodel package unregistered")
+    print(f"sanmodel v0.3 package unregistered")
 
 if __name__ == "__main__":
     register()
