@@ -31,12 +31,12 @@ modules = [
 def register():
     for m in modules:
         m.register()
-    print(f"sanmodel v0.3 package registered")
+    utils.console_notice(f"sanmodel v0.3 package registered")
 
 def unregister():
     for m in modules:
         m.unregister()
-    print(f"sanmodel v0.3 package unregistered")
+    utils.console_notice(f"sanmodel v0.3 package unregistered")
 
 if __name__ == "__main__":
     register()
@@ -149,4 +149,4 @@ if __name__ == "__main__":
     # uv3           Vector2 float
     # colors        rgba float
     # indices       int
-    # bindposes     matrix4x4 = 4xVector4 float
+    # bindposes     matrix4x4 = 4x Vector4 float

@@ -17,5 +17,5 @@ After the import, its properties will be displayed, but the model is not yet cre
 Armature should work, but YZ axis might be swapped, it is still worked on at the moment.
 Before exporting, you can write a name for the model in the text field, this name will be used in the data, this is not the name of the exported file. To export, select an object and click the export button.
 
-### Setting panel
+### Settings panel
 Blender, Unity, or other 3d engines, dont use the same coordinate system. These settings act on the coordinates (vertices and UV) when importing/exporting. There might be some tweeking to do, feedbacks are welcome.

@@ -8,6 +8,7 @@ from bpy.types import (
     Operator,
 )
 from .utils import (
+    console_notice,
     console_debug,
     console_debug_data,
     vecSanmodelToBlender,
@@ -15,6 +16,9 @@ from .utils import (
 )
 from . import sanmodel as S
 
+
+def boneweights_to_uv(boneweights):
+    return np.array([[e, 0.0] for e in boneweights], dtype=S.SAN_ENDIAN+"f").flatten()
 
 class MESH_OT_sanmodel_export(Operator):
     """export a sanmodel file"""
@@ -108,7 +112,7 @@ class MESH_OT_sanmodel_export(Operator):
     def extract_uv(mesh, amount, name, mirror_uv_vertically):
         uv_layer = mesh.uv_layers.get(name)
         if not uv_layer:
-            #print(f"uv_layer '{name}' not found")
+            #console_notice(f"uv_layer '{name}' not found")
             return []
         uvmap = np.empty(amount*2, dtype=S.SAN_ENDIAN+"f")
         i = 0
@@ -128,21 +132,21 @@ class MESH_OT_sanmodel_export(Operator):
         
         # if not len(obj.material_slots):
         if not obj.active_material:
-            print(f"no material found, ignoring colors")
+            console_notice(f"no material found, ignoring colors")
             return []
         
         colors = np.empty(amount*4, dtype=S.SAN_ENDIAN+"f")
         mat = obj.active_material
         if not mat.use_nodes:
-            print(f"BSDF_PRINCIPLED is not used for the colors, getting 1 color for all vertices")
+            console_notice(f"BSDF_PRINCIPLED is not used for the colors, getting 1 color for all vertices")
             return np.array([mat.diffuse_color for i in range(0, amount)], dtype=S.SAN_ENDIAN+"f").flatten()
         bsdf = mat.node_tree.nodes.get("Principled BSDF") # "Principled BSDF" is the name, "BSDF_PRINCIPLED" is the type
         if not bsdf:
-            print(f"BSDF_PRINCIPLED is not used for the colors, ignoring colors")
+            console_notice(f"BSDF_PRINCIPLED is not used for the colors, ignoring colors")
             return []
         color_layer = bmesh.vertex_colors.active
         if not color_layer:
-            print(f"vertex color is not used for the colors, getting 1 color from BSDF_PRINCIPLED for all vertices")
+            console_notice(f"vertex color is not used for the colors, getting 1 color from BSDF_PRINCIPLED for all vertices")
             colors = np.array([bsdf.inputs.get("Base Color").default_value[0:4] for i in range(0, amount)], dtype=S.SAN_ENDIAN+"f").flatten()
             # if settings.extract_with_global_alpha: # object alpha is different from vertices alpha
                 # colors[3::4] = [bsdf.inputs.get("Alpha").default_value for i in range(0, amount)]
@@ -170,6 +174,8 @@ class MESH_OT_sanmodel_export(Operator):
         for v in obj.data.vertices:
             group = sorted([(g.group, obj.vertex_groups[g.group].weight(v.index)) for g in v.groups], key=lambda tup: tup[1], reverse=True)[0]
             boneweights.append(group[0]) if len(boneweights) > 0 else boneweights.append(0)
+        console_debug(f"boneweights : {len(boneweights)}")
+        console_debug_data(boneweights)
         return np.array(boneweights, dtype=S.SAN_ENDIAN+"i").flatten()
 
     @staticmethod
@@ -192,12 +198,12 @@ class MESH_OT_sanmodel_export(Operator):
     # https://blender.stackexchange.com/questions/57327/get-hard-shading-normals-in-bpy
     def execute(self, context):
         if not (context.selected_objects):
-            print("No Object selected")
+            console_notice("No Object selected")
             return {"CANCELLED"}
 
         settings = context.scene.san_settings
         export_path = pathlib.Path(self.path)
-        print("export as " + export_path.name)
+        console_notice("export as " + export_path.name)
 
         # Note: this is not compatible with exporting multiple objects! when multi export comes around, it's best to discard any selected objects that are of type armature
         if context.selected_objects[0].type == 'ARMATURE':
@@ -214,7 +220,7 @@ class MESH_OT_sanmodel_export(Operator):
         console_debug(f"vertices: {len_vertices}")
 
         console_debug(f"# grabbing uv_layers names (same order as in the UI)")
-        uv_names = ["0", "1", "2"]
+        uv_names = ["0", "1"] # only 2 UV layers max, because one UV segment of sanmodel is reserved for boneweights 
         for i, l in enumerate(bl_mesh.uv_layers):
             uv_names[i] = l.name
             console_debug(f"found UV layer: {l.name}")
@@ -223,37 +229,48 @@ class MESH_OT_sanmodel_export(Operator):
             self.extract_vertices(bl_mesh, settings.swap_yz_axis),
             self.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
             self.extract_tangents(bl_mesh, len_vertices, settings.swap_yz_axis, settings.mirror_uv_vertically),
-            # self.extract_uv(bl_mesh, len_vertices, S.UV1_NAME, settings.mirror_uv_vertically),
-            # self.extract_uv(bl_mesh, len_vertices, S.UV2_NAME, settings.mirror_uv_vertically),
-            # self.extract_uv(bl_mesh, len_vertices, S.UV3_NAME, settings.mirror_uv_vertically),
             self.extract_uv(bl_mesh, len_vertices, uv_names[0], settings.mirror_uv_vertically),
+            # There is still a bug with boneweights when importing-exporting-reimporting-reexporting a sanmodel 
+            # (importing and reexporting blender generated sanmodels) 
+            # boneweights_to_uv(self.extract_boneWeights(bl_armature, bl_obj)), # UV2 segment for boneweights
+            [],
             self.extract_uv(bl_mesh, len_vertices, uv_names[1], settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, uv_names[2], settings.mirror_uv_vertically),
             self.extract_colors(bl_obj, bl_mesh, len_vertices),
             self.extract_indices(bl_mesh, settings.swap_yz_axis),
-            # self.extract_boneWeights(bl_armature, bl_obj), # now in uv3.x
             self.extract_bindposes(bl_armature),
         ]
+        console_debug(f"tmp: boneweights to uv len : {len(segments[S.SAN_UV2])}")
+        # console_debug(segments[S.SAN_UV2])
 
         for i, s in enumerate(segments):
             array_size = len(s)
             export_n = array_size // S.seg_vars[i]
-            console_debug(f"segment[{i}] : {S.seg_names[i]} : {export_n} elements for {array_size} numbers")
+
+            console_debug(f"[Write Process] segment[{i}]: {S.seg_names[i]}: {export_n}, {array_size} values ({array_size*4} bytes)")
             if (array_size != export_n * S.seg_vars[i]):
-                print(f"Error: array size is not a multiple of {S.seg_vars[i]}")
+                console_notice(f"Error: array size is not a multiple of {S.seg_vars[i]}")
                 return {"CANCELLED"}
-            bn = struct.pack(S.SAN_ENDIAN+"i", export_n) #bytearray([export_n])
-            barray = bytearray(s)#todo: force endian
-            data[len(data):] = bn
-            data[len(data):] = barray
-            # console_debug_data(bn)
-            # console_debug_data(barray)
-        console_debug("\nexport full data:")
+
+            b_n = struct.pack(S.SAN_ENDIAN+"i", export_n) #bytearray([export_n])
+            b_array = bytearray(s)#todo: force endian
+            
+            b_array_len = len(b_array)
+            if (b_array_len != array_size*4):
+                console_notice(f"Error with the byte data: byte array size: {b_array_len}, ie {b_array_len/4} values")
+                console_notice(f"[Write Process] segment[{i}]: {S.seg_names[i]}: {export_n}, {array_size} values ({array_size*4} bytes)")
+                return {"CANCELLED"}
+            
+            data[len(data):] = b_n
+            data[len(data):] = b_array
+            console_debug(f"full data len: {len(data)}")
+            console_debug(f"")
+        
+        console_debug("export full data:")
         console_debug_data(data)
         f = open(self.path, 'wb')
         f.write(data)
         f.close()
-        print("export done")
+        console_notice("export done")
         return {"FINISHED"}
    
 
@@ -266,12 +283,12 @@ blender_classes = [
 def register():
     for bl_class in blender_classes:
         bpy.utils.register_class(bl_class)
-    print("sanmodel_importer.py registered")
+    console_notice("sanmodel_importer.py registered")
 
 def unregister():
     for bl_class in blender_classes:
         bpy.utils.unregister_class(bl_class)
-    print("sanmodel_importer.py unregistered")
+    console_notice("sanmodel_importer.py unregistered")
 
 if __name__ == "__main__":
     register()

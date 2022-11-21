@@ -9,6 +9,7 @@ from mathutils import (
 from . import sanmodel as S
 
 from .utils import (
+    console_notice,
     console_debug,
     console_debug_data,
 )
@@ -51,7 +52,7 @@ class MESH_OT_debug_sanmodel(Operator):
     def execute(self, context):
         settings = context.scene.san_settings
         if not (context.selected_objects):
-            print("no object selected")
+            console_notice("no object selected")
             self.report({"INFO"}, "No object selected")
             return {"CANCELLED"}
 
@@ -59,7 +60,7 @@ class MESH_OT_debug_sanmodel(Operator):
         me = obj.data
         uv_layer = me.uv_layers.active.data
 
-        print("t")
+        console_notice("t")
         # for poly in me.polygons:
         #     console_debug("Polygon index: %d, length: %d" % (poly.index, poly.loop_total))
 
@@ -204,14 +205,14 @@ def register():
         bpy.utils.register_class(bl_class)
     # bpy.types.TOPBAR_MT_file_import.append(import_menu_draw)
     # bpy.types.TOPBAR_MT_file_export.append(export_menu_draw)
-    print("panels.py registered")
+    console_notice("panels.py registered")
 
 def unregister():
     for bl_class in blender_classes:
         bpy.utils.unregister_class(bl_class)
     # bpy.types.TOPBAR_MT_file_import.remove(import_menu_draw)
     # bpy.types.TOPBAR_MT_file_export.remove(export_menu_draw)
-    print("panels.py unregistered")
+    console_notice("panels.py unregistered")
 
 if __name__ == "__main__":
     register()

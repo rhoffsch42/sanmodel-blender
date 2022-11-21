@@ -8,6 +8,7 @@ from mathutils import (
     Matrix
 )
 from .utils import (
+    console_notice,
     console_debug,
     console_debug_data,
     vecSanmodelToBlender,
@@ -51,12 +52,12 @@ class MESH_OT_sanmodel_import(Operator):
         #https://b3d.interplanety.org/en/working-with-uv-maps-through-the-blender-api/
         #cube example : 6 quadfaces -> 12 triangles -> 36 vertices -> 36 uv
         obj.data.uv_layers.new(name=uv_name)
-        print(f"created uv_layer {uv_name}")
         i = 0
         for poly in obj.data.polygons:
             for idx in poly.vertices:
                 obj.data.uv_layers[uv_name].data[i].uv = uv[idx]
                 i += 1
+        console_notice(f"created uv_layer {uv_name} (len: {len(obj.data.uv_layers[uv_name].data)})")
 
     @staticmethod
     def apply_uv(context, obj, uv_array, uv_name):
@@ -74,7 +75,7 @@ class MESH_OT_sanmodel_import(Operator):
 
         if len(colors) == 0:
             return
-        print("applying colors...")
+        console_notice("applying colors...")
         # https://blenderscripting.blogspot.com/2013/03/vertex-color-map.html
         # further https://blenderscripting.blogspot.com/2013/03/painting-vertex-color-map-using.html
         if not obj.data.vertex_colors:
@@ -124,13 +125,14 @@ class MESH_OT_sanmodel_import(Operator):
         bpy.ops.object.mode_set(mode='EDIT', toggle=False)
         edit_bones = armature.data.edit_bones
         edit_bones.remove(edit_bones[0])
+        console_debug("bindposes")
         for i in range(bone_count):
             bone = edit_bones.new("Bone_" + str(i))
             MESH_OT_sanmodel_import.extract_additional_bone_data(bone, bone_matrix[i])
-            console_debug_data(bone_matrix[i])
             test = bone_matrix[i]
             # https://developer.blender.org/diffusion/BS/browse/master/source/blender/editors/armature/armature_utils.c
             bone.matrix = test
+        console_debug_data(bone_matrix)
         bpy.ops.object.mode_set(mode='OBJECT')
 
     @staticmethod
@@ -141,11 +143,12 @@ class MESH_OT_sanmodel_import(Operator):
     @staticmethod
     def apply_boneweights(context, obj, data):
         if len(data) == 0:
+            console_debug("no bone data")
             return
         # active_object is now Armature, because of creation operator in apply_bindposes
         armature = context.active_object
 
-        console_debug_data("bone data")
+        console_debug("bone data")
         console_debug_data(data)
         bone_count = len(armature.data.bones)
         v_groups = [ [] for i in range(bone_count)]
@@ -162,20 +165,18 @@ class MESH_OT_sanmodel_import(Operator):
     def execute(self, context):
         settings = context.scene.san_settings
         if not S.smd:
-            print("Error: No data available to create the object")
+            console_notice("Error: No data available to create the object")
             return {"CANCELLED"}
 
         for i, seg in enumerate(S.smd.segments):
-            console_debug("")
-            console_debug(f"{i}: {S.seg_names[i]}:")
-            console_debug(f"seg len: {len(seg)}")
+            console_debug(f"{i}: {S.seg_names[i]}: len: {len(seg)}")
             # console_debug_data(seg)
         # return {"FINISHED"}
 
         obj = S.smd.create_obj(context)
         self.apply_normals(obj, S.smd.segments[S.SAN_NORMALS], settings.swap_yz_axis)
         self.apply_uv(context, obj, S.smd.segments[S.SAN_UV1], S.UV1_NAME)
-        self.apply_tangents(obj, S.smd.segments[S.SAN_TANGENTS], S.UV1_NAME) # requires uv1
+        self.apply_tangents(obj, S.smd.segments[S.SAN_TANGENTS], S.UV1_NAME) # requires UV1
         # self.apply_uv(context, obj, S.smd.segments[S.SAN_UV2], S.UV2_NAME) # these are in fact boneweights
         self.apply_uv(context, obj, S.smd.segments[S.SAN_UV3], S.UV3_NAME)
         if settings.use_vertex_colors:
@@ -185,9 +186,8 @@ class MESH_OT_sanmodel_import(Operator):
             console_debug("Model has no bindposes. Ignoring segments SAN_UV2 (boneweights).")
         else:
             self.apply_boneweights(context, obj, uv_to_boneweights(S.smd.segments[S.SAN_UV2]))
-        print("Object created")
+        console_notice("Object created")
         return {"FINISHED"}
-
 
 
 blender_classes = [ 
@@ -197,12 +197,12 @@ blender_classes = [
 def register():
     for bl_class in blender_classes:
         bpy.utils.register_class(bl_class)
-    print("sanmodel_importer.py registered")
+    console_notice("sanmodel_importer.py registered")
 
 def unregister():
     for bl_class in blender_classes:
         bpy.utils.unregister_class(bl_class)
-    print("sanmodel_importer.py unregistered")
+    console_notice("sanmodel_importer.py unregistered")
 
 if __name__ == "__main__":
     register()

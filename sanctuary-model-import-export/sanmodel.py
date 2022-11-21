@@ -31,13 +31,14 @@ from bpy.props import (
     PointerProperty,
 )
 from .utils import (
+    console_notice,
     console_debug,
     console_debug_data,
     vecSanmodelToBlender,
     vecBlenderToSanmodel,
 )
 
-seg_names = ["vertices", "normals", "tangents", "uv1", "uv2", "uv3", "colors", "indices", "bindposes"]
+seg_names = ["vertices", "normals", "tangents", "uv1", "uv2 (boneweights)", "uv3", "colors", "indices", "bindposes"]
 seg_vars = [3, 3, 4, 2, 2, 2, 4, 1, 16] # cf file structure
 smd_old = None
 smd = None
@@ -92,17 +93,17 @@ class SanImportSettings(PropertyGroup):
     mirror_uv_vertically : BoolProperty(
         name="Mirror UV vertically",
         description="Blender handle some textures differently.",
-        default = False
+        default = True
         )
     use_vertex_colors : BoolProperty(
         name="Use vertex colors",
         description="Enable or disable the use of vertex colors for triangles shading",
-        default = True
+        default = False
         )
     use_alpha : BoolProperty(
         name="Use Alpha channel (transparency)",
         description="Enable or disable the use of Alpha channel of vertex colors for triangles shading",
-        default = True
+        default = False
         )
     shading_nodes : BoolProperty(
         name="Generate shading nodes",
@@ -126,14 +127,14 @@ class SanmodelData():
         try:
             self.name, self.content = self.content.split(b'\0', 1)
         except ValueError:
-            print("Error with the specified file, invalid data")
+            console_notice("Error with the specified file, invalid data")
             return False
         self.name = self.name.decode()
         content_len = len(self.content)
         bsize = 4 # size for each value in bytes
-        print("model name: %s\ncontent len: %d bytes, %d values" % (self.name, content_len, content_len/bsize))
+        console_notice("model name: %s, content len: %d bytes, %d values" % (self.name, content_len, content_len/bsize))
         if (content_len % bsize) > 0:
-            print("Error with the specified file, invalid data: should be only 4 bytes number after the null terminated name")
+            console_notice("Error with the specified file, invalid data: should be only 4 bytes number after the null terminated name")
             return False
 
         console_debug("---------------- File content (without the name) -----------------")
@@ -148,12 +149,12 @@ class SanmodelData():
         global seg_vars
         for i, vars in enumerate(seg_vars):
             if not len(self.content):
-                print("Error with the specified file, invalid data: missing data")
+                console_notice("Error with the specified file, invalid data: missing data")
                 return False
             segment_len = reinterpret_float_to_int(self.content[0]) * vars
-            console_debug(f"{seg_names[i]}: {segment_len/seg_vars[i]}, segment_len : {segment_len} values ({segment_len*4} bytes)")
+            console_debug(f"[Read Process] segment[{i}]: {seg_names[i]}: {segment_len/seg_vars[i]}, {segment_len} values ({segment_len*4} bytes)")
             if (segment_len):
-                console_debug("slicing data:")
+                # console_debug("slicing data:")
                 data = self.content[1:1+segment_len]
 
                 #reinterpret indices and boneWeights data as int
@@ -162,16 +163,17 @@ class SanmodelData():
                         data[j] = reinterpret_float_to_int(data[j])
 
                 console_debug_data(data)
-                self.segments.append(data) # will rebuild this as tuples later, could be done here
+                self.segments.append(data) # will rebuild this as tuples later
                 self.content = self.content[1+segment_len:]
             else:
-                console_debug("slicing nothing")
+                # console_debug("slicing nothing")
                 self.content = self.content[1:]
                 self.segments.append([])
-        console_debug("data left: ")
-        console_debug_data(self.content)
+        console_debug(f"data left: {len(self.content)}")
         if len(self.content):
-            print("Error with the specified file, invalid data: slicing left some data, this shouldn't be the case.")
+            console_debug_data(self.content)
+        if len(self.content):
+            console_notice("Error with the specified file, invalid data: slicing left some data, this shouldn't be the case.")
             return False
         
         #reinterpret indices and boneWeights data as int
@@ -179,7 +181,7 @@ class SanmodelData():
         #    for j in range(len(self.segments[i])):
         #        self.segments[i][j] = reinterpret_float_to_int(self.segments[i][j]) # and automatically recasted as float because it's a float array
         
-        # rebuild float arrays to tuple arrays
+        # rebuild float arrays to tuple arrays, ex:
         # from : [0, 1, 2, 3, 4, 5, 6, 7, 8]
         # to : [(0, 1, 2), (3, 4, 5), (6, 7, 8)]
         # tuple len is seg_vars[i]
@@ -198,7 +200,7 @@ class SanmodelData():
     
     def create_obj(self, context):
         settings = context.scene.san_settings
-        print("building mesh...")
+        console_notice("building mesh...")
         mesh = bpy.data.meshes.new(self.name + "Mesh")
 
         #swap z and y axis to match unity
@@ -233,12 +235,12 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         smd = SanmodelData()
 
         if self.filepath == "":
-            print(f"'{settings.path}' not found")
+            console_notice(f"'{settings.path}' not found")
             self.report({'ERROR'}, f"Error with the specified file (see System Console for more detail)")
             return {"CANCELLED"}
 
         settings.path = self.filepath
-        print(f"opening '{settings.path}' ...")
+        console_notice(f"opening '{settings.path}' ...")
         with open(settings.path, 'rb') as fs:#todo:check for error
             smd.content = (fs.read())
         
@@ -260,7 +262,7 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         settings.bindposes = str(len(smd.segments[SAN_BINDPOSES]))
         settings.boneweights = str(len(smd.segments[SAN_UV2]))
         context.area.tag_redraw()
-        print("import done, you can create a blender object with the button 'Create new object'")
+        console_notice("import done, you can create a blender object with the button 'Create new object'")
         return {"FINISHED"}
 
 class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
@@ -285,7 +287,7 @@ def register():
     # bpy.types.TOPBAR_MT_file_import.append(import_menu_draw)
     # bpy.types.TOPBAR_MT_file_export.append(export_menu_draw)
     bpy.types.Scene.san_settings = PointerProperty(type=SanImportSettings)
-    print("sanmodel.py registered")
+    console_notice("sanmodel.py registered")
 
 def unregister():
     for bl_class in blender_classes:
@@ -293,7 +295,7 @@ def unregister():
     # bpy.types.TOPBAR_MT_file_import.remove(import_menu_draw)
     # bpy.types.TOPBAR_MT_file_export.remove(export_menu_draw)
     del bpy.types.Scene.san_settings
-    print("sanmodel.py unregistered")
+    console_notice("sanmodel.py unregistered")
 
 if __name__ == "__main__":
     register()
