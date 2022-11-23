@@ -14,8 +14,9 @@ You can simply import a sanmodel with the button.
 After the import, its properties will be displayed, but the model is not yet created. To create it, just click the button "Create new object". Depending on the size of the original model, it might be too small or too big, you can adjust the scale on blender. 
 
 ### Export panel
-Armature should work, but YZ axis might be swapped, it is still worked on at the moment.
-Before exporting, you can write a name for the model in the text field, this name will be used in the data, this is not the name of the exported file. To export, select an object and click the export button.
+Everything is exported in the folder `_sanmodel_exports`, where your Blender file is located.
+Filenames will be the same as the object name, as well as its folder. For example if you have an "EMPTY" object named `Air` containing an object named `Interceptor_T1`, the export will create the file `Interceptor_T1.sanmodel` in the folder `Air`. 
+
 
 ### Settings panel
 Blender, Unity, or other 3d engines, dont use the same coordinate system. These settings act on the coordinates (vertices and UV) when importing/exporting. There might be some tweeking to do, feedbacks are welcome.

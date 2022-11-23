@@ -19,6 +19,13 @@ from . import (
     panels,
     utils,
 )
+import importlib
+importlib.reload(sanmodel)
+importlib.reload(sanmodel_importer)
+importlib.reload(sanmodel_exporter)
+importlib.reload(panels)
+importlib.reload(utils)
+
 modules = [
     sanmodel,
     sanmodel_importer,

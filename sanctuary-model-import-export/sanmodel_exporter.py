@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import bmesh
 import struct
@@ -13,6 +14,7 @@ from .utils import (
     console_debug_data,
     vecSanmodelToBlender,
     vecBlenderToSanmodel,
+    getDeepSelectionMeshes,
 )
 from . import sanmodel as S
 
@@ -20,15 +22,29 @@ from . import sanmodel as S
 def boneweights_to_uv(boneweights):
     return np.array([[e, 0.0] for e in boneweights], dtype=S.SAN_ENDIAN+"f").flatten()
 
+def getParents(obj):
+    # objects can probably have only 1 "EMPTY" parent, check this
+    parents = []
+    p = obj.parent
+    while (p):
+        console_debug(p.name)
+        parents = [p] + parents
+        p = p.parent
+    return parents
+
 class MESH_OT_sanmodel_export(Operator):
     """export a sanmodel file"""
     bl_idname = "mesh.sanmodel_export"
-    bl_label = "Export sanmodel file"
+    bl_label = "Export as sanmodel file"
 
     path: bpy.props.StringProperty(
         description="Full path of the sanmodel file",
         default="",
     )
+
+    @classmethod
+    def poll(cls, context):
+        return (len(context.selected_objects) > 0)
 
     @staticmethod
     def prepare_mesh(context, obj):
@@ -195,26 +211,23 @@ class MESH_OT_sanmodel_export(Operator):
         matrix[3][3] = bone.length
         return matrix
 
-    # https://blender.stackexchange.com/questions/57327/get-hard-shading-normals-in-bpy
-    def execute(self, context):
-        if not (context.selected_objects):
-            console_notice("No Object selected")
-            return {"CANCELLED"}
-
+    @staticmethod
+    def export_object(context, obj, path):
         settings = context.scene.san_settings
-        export_path = pathlib.Path(self.path)
-        console_notice("export as " + export_path.name)
+        export_path = pathlib.Path(path)
+        console_notice("export as:")
+        console_notice(export_path.name)
+        console_notice(export_path.absolute())
 
-        # Note: this is not compatible with exporting multiple objects! when multi export comes around, it's best to discard any selected objects that are of type armature
-        if context.selected_objects[0].type == 'ARMATURE':
-            bl_armature = context.selected_objects[0]
+        if obj.type == 'ARMATURE':
+            bl_armature = obj
             bl_obj = bl_armature.children[0]
         else:
-            bl_obj = context.selected_objects[0]
+            bl_obj = obj
             bl_armature = bl_obj.find_armature()
         
-        data = bytearray(settings.model_name + "\0", "utf-8") # [name\0]
-        bl_mesh = self.prepare_mesh(context, bl_obj)
+        data = bytearray(export_path.stem + "\0", "utf-8") # [name\0]
+        bl_mesh = MESH_OT_sanmodel_export.prepare_mesh(context, bl_obj)
         
         len_vertices = len(bl_mesh.vertices)
         console_debug(f"vertices: {len_vertices}")
@@ -226,18 +239,18 @@ class MESH_OT_sanmodel_export(Operator):
             console_debug(f"found UV layer: {l.name}")
 
         segments = [
-            self.extract_vertices(bl_mesh, settings.swap_yz_axis),
-            self.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
-            self.extract_tangents(bl_mesh, len_vertices, settings.swap_yz_axis, settings.mirror_uv_vertically),
-            self.extract_uv(bl_mesh, len_vertices, uv_names[0], settings.mirror_uv_vertically),
+            MESH_OT_sanmodel_export.extract_vertices(bl_mesh, settings.swap_yz_axis),
+            MESH_OT_sanmodel_export.extract_normals(bl_mesh, len_vertices, settings.swap_yz_axis),
+            MESH_OT_sanmodel_export.extract_tangents(bl_mesh, len_vertices, settings.swap_yz_axis, settings.mirror_uv_vertically),
+            MESH_OT_sanmodel_export.extract_uv(bl_mesh, len_vertices, uv_names[0], settings.mirror_uv_vertically),
             # There is still a bug with boneweights when importing-exporting-reimporting-reexporting a sanmodel 
             # (importing and reexporting blender generated sanmodels) 
-            # boneweights_to_uv(self.extract_boneWeights(bl_armature, bl_obj)), # UV2 segment for boneweights
+            # boneweights_to_uv(MESH_OT_sanmodel_export.extract_boneWeights(bl_armature, bl_obj)), # UV2 segment for boneweights
             [],
-            self.extract_uv(bl_mesh, len_vertices, uv_names[1], settings.mirror_uv_vertically),
-            self.extract_colors(bl_obj, bl_mesh, len_vertices),
-            self.extract_indices(bl_mesh, settings.swap_yz_axis),
-            self.extract_bindposes(bl_armature),
+            MESH_OT_sanmodel_export.extract_uv(bl_mesh, len_vertices, uv_names[1], settings.mirror_uv_vertically),
+            MESH_OT_sanmodel_export.extract_colors(bl_obj, bl_mesh, len_vertices),
+            MESH_OT_sanmodel_export.extract_indices(bl_mesh, settings.swap_yz_axis),
+            MESH_OT_sanmodel_export.extract_bindposes(bl_armature),
         ]
         console_debug(f"tmp: boneweights to uv len : {len(segments[S.SAN_UV2])}")
         # console_debug(segments[S.SAN_UV2])
@@ -263,19 +276,47 @@ class MESH_OT_sanmodel_export(Operator):
             data[len(data):] = b_n
             data[len(data):] = b_array
             console_debug(f"full data len: {len(data)}")
-            console_debug(f"")
         
         console_debug("export full data:")
         console_debug_data(data)
-        f = open(self.path, 'wb')
+        f = open(export_path.absolute(), 'wb')
         f.write(data)
         f.close()
         console_notice("export done")
         return {"FINISHED"}
+
+    # https://blender.stackexchange.com/questions/57327/get-hard-shading-normals-in-bpy
+    def execute(self, context):
+        export_folder = pathlib.Path("./_sanmodel_exports")
+        deep_selected = getDeepSelectionMeshes(context.selected_objects)
+        console_notice("=================== EXPORT ===================")
+        console_notice(f"export folder: {export_folder.absolute()}")
+
+        for obj in deep_selected:
+            # the file will be created in folders with parents names
+            parents = getParents(obj)
+            console_debug(f"{len(parents)} parents")
+            parents_folders = ""
+            for p in parents:
+                parents_folders = parents_folders + p.name + "\\"
+            os.makedirs(f"{export_folder.absolute()}\\{parents_folders}", exist_ok=True)
+
+            # checks if the file already exists, if needed, adds a suffix in windows style. ex: "filename (1).sanmodel"
+            suffix = ""
+            inc = 0
+            while (pathlib.Path(f"{export_folder}\\{parents_folders}{obj.name}{suffix}.sanmodel").is_file()):
+                inc = inc + 1
+                suffix = f" ({inc})"
+
+            MESH_OT_sanmodel_export.export_object(context, obj, f"{export_folder}\\{parents_folders}{obj.name}{suffix}.sanmodel")
+            console_notice("----")
+        
+        end_report = f"exported {len(deep_selected)} objects"
+        self.report({"INFO"}, end_report)
+        console_notice(end_report)
+        console_notice("================= EXPORT END =================")
+        return {"FINISHED"}
    
-
-
-
 blender_classes = [ 
     MESH_OT_sanmodel_export,
 ]

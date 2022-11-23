@@ -116,10 +116,14 @@ class MESH_OT_sanmodel_import(Operator):
         armature = context.active_object
         armature.name = S.smd.name + 'Rig'
 
-        # because the armature is created at the cursor and is parent to the mesh object, the mesh object must be set to 0 location, 
-        # otherwise the cursor transform will be applied twice
-        obj.parent = armature
-        obj.location = Vector((0.0, 0.0, 0.0))
+        if False:
+            # because the armature is created at the cursor and is parent to the mesh object, the mesh object must be set to 0 location, 
+            # otherwise the cursor transform will be applied twice
+            obj.parent = armature
+            obj.location = Vector((0.0, 0.0, 0.0))
+        else:
+            armature.location = Vector((0.0, 0.0, 0.0))
+            armature.parent = obj
 
         # https://devtalk.blender.org/t/add-new-bones-to-armature/15051/3
         bpy.ops.object.mode_set(mode='EDIT', toggle=False)
@@ -188,7 +192,6 @@ class MESH_OT_sanmodel_import(Operator):
             self.apply_boneweights(context, obj, uv_to_boneweights(S.smd.segments[S.SAN_UV2]))
         console_notice("Object created")
         return {"FINISHED"}
-
 
 blender_classes = [ 
     MESH_OT_sanmodel_import,

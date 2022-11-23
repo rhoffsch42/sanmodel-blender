@@ -9,9 +9,11 @@ from mathutils import (
 from . import sanmodel as S
 
 from .utils import (
+    CONSOLE_DEBUG,
     console_notice,
     console_debug,
     console_debug_data,
+    getDeepSelectionMeshes,
 )
 
 class MESH_OT_debug_diff_sanmodel(Operator):
@@ -47,8 +49,60 @@ class MESH_OT_debug_sanmodel(Operator):
     """debug operator for currently selected object [0]"""
     bl_idname = "test.debug_sanmodel"
     bl_label = "debug sanmodel"
-
  
+    def debug_empty(self, empty):
+        console_debug(empty.name)
+        console_debug(f"children: {len(empty.children)}")
+        console_debug("-----")
+        for child in empty.children:
+            if child.type == "EMPTY":
+                self.debug_empty(child)
+            elif child.type == "MESH" or child.type == "ARMATURE":
+                self.debug_mesh(child)
+        console_debug("=====")
+
+    def debug_mesh(self, obj):
+        console_debug(obj.name)
+        mesh = obj.data
+        if not mesh:
+            console_debug(f"has mesh: no")
+        else:
+            console_debug(f"has mesh: yes")
+            if not mesh.uv_layers:
+                console_debug(f"has uv_layers: no")
+            else:
+                console_debug(f"has uv_layers: yes")
+            # uv_layer = mesh.uv_layers.active.data
+
+            # for poly in mesh.polygons:
+            #     console_debug("Polygon index: %d, length: %d" % (poly.index, poly.loop_total))
+            #     # range is used here to show how the polygons reference loops,
+            #     # for convenience 'poly.loop_indices' can be used instead.
+            #     for loop_index in range(poly.loop_start, poly.loop_start + poly.loop_total):
+            #         console_debug("    Vertex: %d" % mesh.loops[loop_index].vertex_index)
+            #         # console_debug("    UV: %r" % uv_layer[loop_index].uv)
+
+            console_debug(f"original mesh polygons: {len(mesh.polygons)}")
+            console_debug(f"original mesh uv_layer ({mesh.uv_layers.active.name}): {len(mesh.uv_layers.active.data)}")
+            console_debug(f"original mesh vertices: {len(mesh.vertices)}")
+            console_debug(f"original mesh loops: {len(mesh.loops)}")
+            # for loop in mesh.loops:
+                # console_debug(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
+            # console_debug([e.uv[:] for e in mesh.uv_layers.active.data])
+            console_debug("- - -")
+            # mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
+            # console_debug(f"evaluated mesh polygons: {len(mesh.polygons)}")
+            # console_debug(f"evaluated mesh uv_layer ({mesh.uv_layers.active.name}): {len(mesh.uv_layers.active.data)}")
+            # console_debug(f"evaluated mesh vertices: {len(mesh.vertices)}")
+            # console_debug(f"evaluated mesh loops: {len(mesh.loops)}")
+            # for loop in mesh.loops:
+                # console_debug(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
+            # console_debug([e.uv[:] for e in mesh.uv_layers.active.data])
+
+    @classmethod
+    def poll(cls, context):
+        return (len(context.selected_objects) > 0)
+
     def execute(self, context):
         settings = context.scene.san_settings
         if not (context.selected_objects):
@@ -56,39 +110,17 @@ class MESH_OT_debug_sanmodel(Operator):
             self.report({"INFO"}, "No object selected")
             return {"CANCELLED"}
 
-        obj = context.selected_objects[0]
-        me = obj.data
-        uv_layer = me.uv_layers.active.data
-
-        console_notice("t")
-        # for poly in me.polygons:
-        #     console_debug("Polygon index: %d, length: %d" % (poly.index, poly.loop_total))
-
-        #     # range is used here to show how the polygons reference loops,
-        #     # for convenience 'poly.loop_indices' can be used instead.
-        #     for loop_index in range(poly.loop_start, poly.loop_start + poly.loop_total):
-        #         console_debug("    Vertex: %d" % me.loops[loop_index].vertex_index)
-        #         # console_debug("    UV: %r" % uv_layer[loop_index].uv)
-
-        console_debug(f"original mesh polygons: {len(me.polygons)}")
-        console_debug(f"original mesh uv_layer ({me.uv_layers.active.name}): {len(me.uv_layers.active.data)}")
-        console_debug(f"original mesh vertices: {len(me.vertices)}")
-        console_debug(f"original mesh loops: {len(me.loops)}")
-        # for loop in me.loops:
-            # console_debug(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
-        # console_debug([e.uv[:] for e in me.uv_layers.active.data])
-        console_debug("- - -")
-        # mesh = MESH_OT_sanmodel_export.prepare_mesh(context, obj)
-        # console_debug(f"evaluated mesh polygons: {len(mesh.polygons)}")
-        # console_debug(f"evaluated mesh uv_layer ({mesh.uv_layers.active.name}): {len(mesh.uv_layers.active.data)}")
-        # console_debug(f"evaluated mesh vertices: {len(mesh.vertices)}")
-        # console_debug(f"evaluated mesh loops: {len(mesh.loops)}")
-        # for loop in mesh.loops:
-            # console_debug(f"{loop.vertex_index}: {loop.normal} {loop.tangent} {loop.bitangent} {loop.bitangent_sign}")
-        # console_debug([e.uv[:] for e in mesh.uv_layers.active.data])
-        console_debug("--------------")
-        console_debug(S.smd)
-        console_debug(S.seg_names)
+        console_debug(f"================== SELECTION DEBUG ==================")
+        console_debug(f"objects selected: {len(context.selected_objects)}")
+        console_debug("=====")
+        for o in context.selected_objects:
+            if o.type == "EMPTY":
+                self.debug_empty(o)
+            elif o.type == "MESH" or o.type == "ARMATURE":
+                self.debug_mesh(o)
+        console_debug(f"================ SELECTION DEBUG END ================")
+        # console_debug(S.smd)
+        # console_debug(S.seg_names)
         return {"FINISHED"}
 
 
@@ -139,12 +171,16 @@ class VIEW_3D_PT_sanmodel_export_panel(SanmodelPanel, Panel):
     def draw(self, context):
         settings = context.scene.san_settings
         # rna_model_name = settings.bl_rna.properties["model_name"]
+        selected_mesh = getDeepSelectionMeshes(context.selected_objects)
+        selected = len(context.selected_objects)
+        deep_selected = len(selected_mesh)
 
         col = self.layout.column(align=False)
-        col.prop(settings, "model_name")
-        col.operator("export.open_filebrowser",
-            text="export",
-            icon="EXPORT")
+        # col.prop(settings, "model_name")
+        col.operator("mesh.sanmodel_export",
+                text=f"export {selected} ({deep_selected}) objects",
+                icon="EXPORT")
+
 class VIEW_3D_PT_sanmodel_settings_panel(SanmodelPanel, Panel):
     bl_label = "Settings"
     bl_idname = "SANMODEL_PANEL_PT_sanmodel_settings_panel"
@@ -174,12 +210,13 @@ class VIEW_3D_PT_sanmodel_debug_panel(SanmodelPanel, Panel):
     def draw(self, context):
         # settings = context.scene.san_settings
         layout = self.layout
-        layout.operator("test.debug_sanmodel",
-            text = "selected object debug",
-            icon = "INFO")
-        layout.operator("test.debug_diff_sanmodel",
-            text = "diff of the 2 last imported .sanmodel",
-            icon = "ARROW_LEFTRIGHT")
+        if CONSOLE_DEBUG:
+            layout.operator("test.debug_sanmodel",
+                text = "selected objects debug",
+                icon = "INFO")
+            layout.operator("test.debug_diff_sanmodel",
+                text = "diff of the 2 last imported .sanmodel",
+                icon = "ARROW_LEFTRIGHT")
 
 # UI example : File > import
 # def import_menu_draw(self, context):

@@ -110,6 +110,9 @@ class SanImportSettings(PropertyGroup):
         description="Generate shading nodes depending on previous settings (vertex_color, uv)",
         default = False
         )
+    
+    # model_name is not used anymore for export, it may change later.
+    # https://blender.stackexchange.com/questions/203442/how-to-pass-a-bpy-data-objects-bpy-data-materials-etc-to-an-operator-from-th
     model_name: StringProperty(
         name="Model name",
         description="the name of the model used when exporting",
@@ -221,9 +224,11 @@ class SanmodelData():
         obj.select_set(True)
         return obj
  
-class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
+class OT_ImportFilebrowser(Operator, ImportHelper):
     bl_idname = "import.open_filebrowser"
     bl_label = "Open"
+    filename_ext = ".sanmodel"
+    filter_glob: StringProperty( default='*.sanmodel', options={'HIDDEN'} )
     
     def execute(self, context):
         """Do something with the selected file(s)."""
@@ -265,11 +270,22 @@ class OT_ImportFilebrowser(Operator, ImportHelper):#todo: filter .sanmodel
         console_notice("import done, you can create a blender object with the button 'Create new object'")
         return {"FINISHED"}
 
-class OT_ExportFilebrowser(Operator, ExportHelper):#todo: filter .sanmodel
+class OT_ExportFilebrowser(Operator, ExportHelper):
     bl_idname = "export.open_filebrowser"
     bl_label = "Save"
-
     filename_ext = ".sanmodel"
+    filter_glob: StringProperty( default="*.sanmodel", options={"HIDDEN"} )
+
+    some_boolean: BoolProperty(
+            name="This has no effect",
+            description="It's only here for dev reason.",
+            default=True,
+            )
+
+    @classmethod
+    def poll(cls, context):
+        return (len(context.selected_objects) > 0)
+
     def execute(self, context):
         """Choose a name for the file to be saved"""
         bpy.ops.mesh.sanmodel_export(path=self.filepath)
