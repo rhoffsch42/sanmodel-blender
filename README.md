@@ -26,9 +26,11 @@ Blender, Unity, or other 3d engines, dont use the same coordinate system. These 
 
 __v0.3.0__
 
+Import:
+ - Added a display filter for sanmodel files when opening the file browser.
+ 
 Export:
  - Now exports the 2 first UV layers, instead of UV1Map and UV2Map.
  - It is possible to export multiple objects at once. For more details, check the `Export panel` section above.
  - For now, boneweights are not exported.
- - Added a display filter for sanmodel files when opening the file browser.
 
