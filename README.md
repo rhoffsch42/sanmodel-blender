@@ -20,3 +20,13 @@ Filenames will be the same as the object name, as well as its folder. For exampl
 
 ### Settings panel
 Blender, Unity, or other 3d engines, dont use the same coordinate system. These settings act on the coordinates (vertices and UV) when importing/exporting. There might be some tweeking to do, feedbacks are welcome.
+
+#
+### Changes
+
+__v0.3.0__
+
+Export:
+ - Now exports the 2 first UV layers, instead of UV1Map and UV2Map.
+ - It is possible to export multiple objects at once. For more details, check the `Export panel` section above.
+ - For now, boneweights are not exported.
