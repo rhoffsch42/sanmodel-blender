@@ -30,3 +30,5 @@ Export:
  - Now exports the 2 first UV layers, instead of UV1Map and UV2Map.
  - It is possible to export multiple objects at once. For more details, check the `Export panel` section above.
  - For now, boneweights are not exported.
+ - Added a display filter for sanmodel files when opening the file browser.
+
